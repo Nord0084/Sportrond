@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#1D9E75">
+<title>Sportrond</title>
+<style>
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #6b7280;
+  --color-text-tertiary: #9ca3af;
+  --color-text-success: #15803d;
+  --color-text-warning: #b45309;
+  --color-text-info: #1d4ed8;
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f9fafb;
+  --color-background-success: #dcfce7;
+  --color-background-warning: #fef3c7;
+  --color-background-info: #dbeafe;
+  --color-border-tertiary: #e5e7eb;
+  --color-border-secondary: #d1d5db;
+  --color-border-success: #86efac;
+  --color-border-warning: #fcd34d;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); font-size: 15px; color: var(--color-text-primary); background: #f3f4f6; -webkit-tap-highlight-color: transparent; }
+.screen { display: none; padding: 0 0 80px; }
+.screen.active { display: block; }
+.topbar { background: var(--color-background-primary); border-bottom: 0.5px solid var(--color-border-tertiary); padding: 14px 16px; position: sticky; top: 0; z-index: 10; }
+.topbar h1 { font-size: 16px; font-weight: 600; }
+.navbar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--color-background-primary); border-top: 0.5px solid var(--color-border-tertiary); display: flex; padding-bottom: env(safe-area-inset-bottom); }
+.nav-btn { flex: 1; padding: 10px 2px 8px; border: none; background: transparent; cursor: pointer; font-size: 10px; color: var(--color-text-secondary); display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.nav-btn.active { color: #1D9E75; }
+.nav-icon { font-size: 20px; }
+.section { padding: 12px 16px; }
+.card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); margin-bottom: 10px; overflow: hidden; }
+.card-header { padding: 12px 14px; font-weight: 600; font-size: 14px; background: var(--color-background-secondary); border-bottom: 0.5px solid var(--color-border-tertiary); display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
+.check-item { padding: 11px 14px; border-bottom: 0.5px solid var(--color-border-tertiary); display: flex; align-items: flex-start; gap: 10px; }
+.check-item:last-child { border-bottom: none; }
+.check-item input[type=checkbox] { margin-top: 3px; width: 20px; height: 20px; flex-shrink: 0; cursor: pointer; accent-color: #1D9E75; }
+.check-label { flex: 1; font-size: 14px; line-height: 1.4; }
+.check-label.done { text-decoration: line-through; color: var(--color-text-tertiary); }
+.check-hint { font-size: 11px; color: var(--color-text-tertiary); margin-top: 2px; }
+.avvik-btn { font-size: 11px; color: var(--color-text-secondary); border: 0.5px solid var(--color-border-secondary); border-radius: 6px; padding: 4px 10px; background: transparent; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.avvik-btn.has-note { color: var(--color-text-warning); border-color: var(--color-border-warning); background: var(--color-background-warning); }
+.fab { position: fixed; bottom: calc(72px + env(safe-area-inset-bottom)); right: 16px; background: #1D9E75; color: white; border: none; border-radius: 50px; padding: 14px 22px; font-size: 15px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(29,158,117,0.35); }
+select { width: 100%; padding: 12px 14px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: var(--color-background-primary); color: var(--color-text-primary); font-size: 15px; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+.badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 500; }
+.badge-ok { background: var(--color-background-success); color: var(--color-text-success); }
+.badge-avvik { background: var(--color-background-warning); color: var(--color-text-warning); }
+.badge-atg { background: var(--color-background-info); color: var(--color-text-info); }
+.hist-item { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 14px; margin-bottom: 10px; }
+.hist-item h3 { font-size: 15px; font-weight: 600; margin-bottom: 5px; }
+.hist-meta { font-size: 12px; color: var(--color-text-secondary); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+.hist-avv-list { margin: 8px 0 6px; border-top: 0.5px solid var(--color-border-tertiary); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.hist-avv-row { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 8px 10px; }
+.hist-avv-punkt { font-size: 12px; font-weight: 600; color: var(--color-text-warning); margin-bottom: 2px; }
+.hist-avv-text { font-size: 12px; color: var(--color-text-primary); }
+.hist-avv-status { font-size: 11px; margin-top: 3px; }
+.filter-row { margin-bottom: 12px; }
+.avv-item { background: var(--color-background-primary); border: 0.5px solid var(--color-border-warning); border-radius: var(--border-radius-lg); padding: 14px; margin-bottom: 10px; }
+.avv-item.atgardad { border-color: var(--color-border-success); opacity: 0.75; }
+.avv-item h3 { font-size: 14px; font-weight: 600; color: var(--color-text-warning); margin-bottom: 3px; }
+.avv-item.atgardad h3 { color: var(--color-text-success); }
+.avv-item p { font-size: 13px; margin-top: 4px; line-height: 1.4; }
+.avv-item .meta { font-size: 11px; color: var(--color-text-secondary); margin-top: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.atg-btn { font-size: 12px; padding: 5px 12px; border-radius: 6px; border: 0.5px solid var(--color-border-secondary); background: transparent; color: var(--color-text-secondary); cursor: pointer; white-space: nowrap; }
+.atg-btn.done { background: var(--color-background-success); color: var(--color-text-success); border-color: var(--color-border-success); }
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; align-items: flex-end; justify-content: center; padding: 0; }
+.modal-overlay.open { display: flex; }
+.modal { background: var(--color-background-primary); border-radius: 16px 16px 0 0; padding: 20px 20px calc(20px + env(safe-area-inset-bottom)); width: 100%; }
+.modal h2 { font-size: 15px; font-weight: 600; margin-bottom: 3px; }
+.modal .hint { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 12px; }
+textarea { width: 100%; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); padding: 12px; font-size: 15px; font-family: var(--font-sans); color: var(--color-text-primary); background: var(--color-background-primary); resize: none; height: 100px; }
+.modal-btns { display: flex; gap: 10px; margin-top: 14px; }
+.modal-btns button { flex: 1; padding: 12px; border-radius: var(--border-radius-md); font-size: 15px; cursor: pointer; border: 0.5px solid var(--color-border-secondary); background: var(--color-background-secondary); color: var(--color-text-primary); font-weight: 500; }
+.modal-btns .btn-save { background: #1D9E75; color: white; border-color: #1D9E75; font-weight: 600; }
+.empty { text-align: center; padding: 50px 20px; color: var(--color-text-secondary); font-size: 14px; }
+.progress-bar { height: 5px; background: #e5e7eb; border-radius: 3px; margin: 10px 16px 0; }
+.progress-fill { height: 100%; background: #1D9E75; border-radius: 3px; transition: width 0.3s; }
+.start-screen { padding: 28px 16px; }
+.start-screen h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+.start-screen p { font-size: 14px; color: var(--color-text-secondary); margin-bottom: 20px; }
+.btn-start { width: 100%; background: #1D9E75; color: white; border: none; border-radius: var(--border-radius-md); padding: 15px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 14px; }
+.export-row { display: flex; gap: 8px; margin-top: 10px; }
+.export-btn { flex: 1; padding: 9px 10px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: var(--color-background-secondary); color: var(--color-text-primary); font-size: 12px; cursor: pointer; text-align: center; font-weight: 500; }
+.tab-pills { display: flex; gap: 8px; margin-bottom: 14px; }
+.pill { flex: 1; padding: 9px 8px; border: 0.5px solid var(--color-border-secondary); border-radius: 24px; font-size: 13px; text-align: center; cursor: pointer; background: transparent; color: var(--color-text-secondary); font-weight: 500; }
+.pill.active { background: #1D9E75; color: white; border-color: #1D9E75; }
+.logo { font-size: 13px; color: var(--color-text-tertiary); margin-top: 3px; }
+</style>
+</head>
+<body>
+
+<div class="screen active" id="screen-rondering">
+  <div class="topbar">
+    <h1 id="topbar-title">Välj anläggning</h1>
+    <div class="logo">Sportrond</div>
+  </div>
+  <div id="start-view" class="start-screen">
+    <h2>Ny rondering</h2>
+    <p>Välj anläggning för att starta checklistan.</p>
+    <select id="anl-select"></select>
+    <button class="btn-start" onclick="startRondering()">Starta rondering</button>
+  </div>
+  <div id="check-view" style="display:none;">
+    <div class="progress-bar"><div class="progress-fill" id="prog" style="width:0%"></div></div>
+    <div style="padding:8px 16px 4px;font-size:12px;color:#6b7280;" id="prog-label">0 av 0 kontrollerade</div>
+    <div id="checklist-body" class="section"></div>
+    <button class="fab" onclick="avslutaRondering()">Avsluta &amp; spara</button>
+  </div>
+</div>
+
+<div class="screen" id="screen-historik">
+  <div class="topbar"><h1>Historik</h1></div>
+  <div class="section" id="hist-list"></div>
+</div>
+
+<div class="screen" id="screen-avvikelser">
+  <div class="topbar"><h1>Avvikelser</h1></div>
+  <div class="section">
+    <div class="tab-pills">
+      <button class="pill active" onclick="setAvvTab('aktiva',this)">Aktiva</button>
+      <button class="pill" onclick="setAvvTab('atgardade',this)">Åtgärdade</button>
+    </div>
+    <div class="filter-row">
+      <select id="avv-filter-anl" onchange="renderAvvikelser()"></select>
+    </div>
+    <div id="avv-list"></div>
+    <div id="export-avv-row" style="margin-top:8px;display:none;">
+      <button class="export-btn" style="width:100%;" onclick="exportAvvikelserPDF()">Exportera avvikelser (PDF)</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="avvik-modal" onclick="handleOverlayClick(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h2 id="modal-title"></h2>
+    <div class="hint" id="modal-hint"></div>
+    <textarea id="modal-input" placeholder="Beskriv avvikelsen..."></textarea>
+    <div class="modal-btns">
+      <button onclick="closeModal()">Avbryt</button>
+      <button class="btn-save" onclick="saveNote()">Spara</button>
+    </div>
+  </div>
+</div>
+
+<div class="navbar">
+  <button class="nav-btn active" onclick="goTo('rondering',this)"><span class="nav-icon">☑️</span>Rondering</button>
+  <button class="nav-btn" onclick="goTo('historik',this)"><span class="nav-icon">📋</span>Historik</button>
+  <button class="nav-btn" onclick="goTo('avvikelser',this)"><span class="nav-icon">⚠️</span>Avvikelser</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+const ANLAGGNINGAR = [
+  'Stavsborgs sporthallar','Nacka sportcentrum Bollhall','Nacka sportcentrum Sporthall',
+  'Tippens sporthall','Järla sporthall','Skuruhallen','Jensen sporthall',
+  'Kvarnholmens sporthall','Björknäs sporthall','Ormingehallen','Tollare sporthall',
+  'Sickla sporthall','Tattby sporthall','Fisksätra sporthall','Myrsjö sporthall B',
+  'Sigfridsborgs sporthall','Myrsjö sporthall A','Boo Gårds sporthall',
+  'Ektorps sporthall','Fisksätra multihall Sporthall','Fisksätra multihall Baskethall',
+  'Fisksätra multihall Friidrottshall'
+];
+
+const KATEGORIER = [
+  { namn:"1. Allmänna ytor", collapsed:false, punkter:[
+    {namn:"Entréområde",hint:"Rent, halkfritt"},
+    {namn:"Belysning utomhus",hint:"Fungerar"},
+    {namn:"Golv",hint:"Skador, smuts, halkrisk"},
+    {namn:"Väggar",hint:"Sprickor, fläckar, skador"},
+    {namn:"Tak",hint:"Läckage, missfärgningar, hängande material"},
+    {namn:"Belysning inomhus",hint:"Fungerande, tillräcklig ljusstyrka"},
+    {namn:"Ventilation",hint:"Fungerar, inga hinder"},
+    {namn:"Dörrar",hint:"Gångjärn, lås, stängning"},
+    {namn:"Fönster",hint:"Hela, rena, öppningsbara vid behov"},
+    {namn:"Utrymningsvägar",hint:"Fria, tydligt markerade"},
+    {namn:"Skyltning",hint:"Nödutgång, brandskydd, regler, hantering passersystem"}
+  ]},
+  { namn:"2. Idrottsutrustning", collapsed:false, punkter:[
+    {namn:"Mål",hint:"Hela, stabila, korrekt placerade"},
+    {namn:"Nät",hint:"Hela, korrekt uppsatta"},
+    {namn:"Ribbstolar, mattor, bänkar",hint:"Skick, fastsättning"},
+    {namn:"Basketkorgar, volleybollställningar etc.",hint:"Funktion, säkerhet"}
+  ]},
+  { namn:"3. Teknik och funktioner", collapsed:false, punkter:[
+    {namn:"Ljudsystem",hint:"Fungerar, inga störningar"},
+    {namn:"Tidtagningstavla / matchklocka",hint:"Fungerar korrekt"},
+    {namn:"Eluttag och strömbrytare",hint:"Hela, säkra"}
+  ]},
+  { namn:"4. Omklädningsrum & hygienutrymmen", collapsed:false, punkter:[
+    {namn:"Duschutrymmen",hint:"Rent, fungerande avlopp"},
+    {namn:"Toaletter",hint:"Rent, fungerande spolning"},
+    {namn:"Speglar och krokar",hint:"Hela, säkert monterade"},
+    {namn:"Golvbrunnar",hint:"Rena, luktfria"}
+  ]},
+  { namn:"5. Säkerhet & brandskydd", collapsed:false, punkter:[
+    {namn:"Brandsläckare",hint:"På plats, kontrollerade"},
+    {namn:"Brandlarm",hint:"Fungerar, testade"},
+    {namn:"Första hjälpen-utrustning, hjärtstartare",hint:"Komplett, tillgänglig"},
+    {namn:"Nödutgångar",hint:"Öppningsbara, ej blockerade"}
+  ]}
+];
+
+function pKey(k,p){ return k.namn+'|'+p.namn; }
+
+let rondering = null;
+let logs = JSON.parse(localStorage.getItem('sportrond_v1') || '[]');
+let avvTab = 'aktiva';
+
+function save(){ localStorage.setItem('sportrond_v1', JSON.stringify(logs)); }
+
+function buildSelects(){
+  const a1 = ['<option value="">— Välj anläggning —</option>',...ANLAGGNINGAR.map(a=>`<option>${a}</option>`)].join('');
+  document.getElementById('anl-select').innerHTML = a1;
+  const a2 = ['<option value="">Alla anläggningar</option>',...ANLAGGNINGAR.map(a=>`<option>${a}</option>`)].join('');
+  document.getElementById('avv-filter-anl').innerHTML = a2;
+}
+
+function goTo(tab,btn){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('screen-'+tab).classList.add('active');
+  btn.classList.add('active');
+  if(tab==='historik') renderHistorik();
+  if(tab==='avvikelser') renderAvvikelser();
+}
+
+function setAvvTab(t,btn){
+  avvTab=t;
+  document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+  btn.classList.add('active');
+  renderAvvikelser();
+}
+
+function startRondering(){
+  const anl=document.getElementById('anl-select').value;
+  if(!anl){alert('Välj en anläggning först.');return;}
+  const now=new Date();
+  rondering={
+    anlaggning:anl,
+    datum:now.toLocaleDateString('sv-SE'),
+    tid:now.toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'}),
+    checks:{},noter:{}
+  };
+  KATEGORIER.forEach(k=>k.punkter.forEach(p=>{
+    const key=pKey(k,p); rondering.checks[key]=false; rondering.noter[key]='';
+  }));
+  document.getElementById('topbar-title').textContent=anl;
+  document.getElementById('start-view').style.display='none';
+  document.getElementById('check-view').style.display='block';
+  KATEGORIER.forEach(k=>k.collapsed=false);
+  renderChecklist();
+}
+
+function renderChecklist(){
+  const body=document.getElementById('checklist-body');
+  body.innerHTML='';
+  KATEGORIER.forEach(kat=>{
+    const doneInCat=kat.punkter.filter(p=>rondering.checks[pKey(kat,p)]).length;
+    const card=document.createElement('div'); card.className='card';
+    const hdr=document.createElement('div'); hdr.className='card-header';
+    hdr.innerHTML=`<span>${kat.namn}</span><span style="font-size:11px;color:#6b7280;">${doneInCat}/${kat.punkter.length} ${kat.collapsed?'▼':'▲'}</span>`;
+    hdr.onclick=()=>{kat.collapsed=!kat.collapsed;renderChecklist();};
+    card.appendChild(hdr);
+    if(!kat.collapsed){
+      kat.punkter.forEach(p=>{
+        const key=pKey(kat,p);
+        const checked=rondering.checks[key];
+        const hasNote=rondering.noter[key];
+        const row=document.createElement('div'); row.className='check-item';
+        row.innerHTML=`
+          <input type="checkbox" ${checked?'checked':''} onchange="toggleCheck('${esc(key)}',this.checked)">
+          <span class="check-label ${checked?'done':''}">
+            ${p.namn}
+            <div class="check-hint">${p.hint}</div>
+          </span>
+          <button class="avvik-btn ${hasNote?'has-note':''}" onclick="openModal('${esc(key)}','${esc(p.namn)}','${esc(p.hint)}')">${hasNote?'⚠️':'+'}</button>`;
+        card.appendChild(row);
+      });
+    }
+    body.appendChild(card);
+  });
+  updateProgress();
+}
+
+function esc(s){return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
+
+function toggleCheck(key,val){
+  rondering.checks[key]=val;
+  updateProgress();
+  setTimeout(renderChecklist,50);
+}
+
+function updateProgress(){
+  if(!rondering)return;
+  const total=Object.keys(rondering.checks).length;
+  const done=Object.values(rondering.checks).filter(Boolean).length;
+  document.getElementById('prog').style.width=(done/total*100)+'%';
+  document.getElementById('prog-label').textContent=`${done} av ${total} kontrollerade`;
+}
+
+let currentKey=null;
+function openModal(key,namn,hint){
+  currentKey=key;
+  document.getElementById('modal-title').textContent=namn;
+  document.getElementById('modal-hint').textContent='Förväntat: '+hint;
+  document.getElementById('modal-input').value=rondering.noter[key]||'';
+  document.getElementById('avvik-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('modal-input').focus(),100);
+}
+function closeModal(){document.getElementById('avvik-modal').classList.remove('open');currentKey=null;}
+function handleOverlayClick(e){if(e.target===document.getElementById('avvik-modal'))closeModal();}
+function saveNote(){
+  if(!currentKey)return;
+  rondering.noter[currentKey]=document.getElementById('modal-input').value.trim();
+  closeModal();
+  renderChecklist();
+}
+
+function avslutaRondering(){
+  if(!rondering)return;
+  const total=Object.keys(rondering.checks).length;
+  const done=Object.values(rondering.checks).filter(Boolean).length;
+  const avvikelser=[];
+  KATEGORIER.forEach(kat=>kat.punkter.forEach(p=>{
+    const key=pKey(kat,p);
+    if(rondering.noter[key]){
+      avvikelser.push({kategori:kat.namn,punkt:p.namn,hint:p.hint,text:rondering.noter[key],atgardad:false,atgDatum:''});
+    }
+  }));
+  logs.unshift({id:Date.now(),anlaggning:rondering.anlaggning,datum:rondering.datum,tid:rondering.tid,total,done,avvikelser});
+  save();
+  rondering=null;
+  document.getElementById('topbar-title').textContent='Välj anläggning';
+  document.getElementById('check-view').style.display='none';
+  document.getElementById('start-view').style.display='block';
+  document.getElementById('anl-select').value='';
+  alert('Ronderingen är sparad!');
+}
+
+function renderHistorik(){
+  const el=document.getElementById('hist-list');
+  if(!logs.length){el.innerHTML='<div class="empty">Inga ronderingar sparade ännu.</div>';return;}
+  el.innerHTML=logs.map((l,i)=>{
+    const avvCount=l.avvikelser.length;
+    const atgCount=l.avvikelser.filter(a=>a.atgardad).length;
+    let badge=avvCount===0?`<span class="badge badge-ok">Inga avvikelser</span>`:`<span class="badge badge-avvik">${avvCount} avvik.</span>`;
+    if(atgCount>0) badge+=` <span class="badge badge-atg">${atgCount} åtg.</span>`;
+    let avvHTML='';
+    if(avvCount>0){
+      const rader=l.avvikelser.map(a=>{
+        const c=a.atgardad?'var(--color-text-success)':'var(--color-text-warning)';
+        const t=a.atgardad?`✓ Åtgärdad ${a.atgDatum}`:'Ej åtgärdad';
+        return `<div class="hist-avv-row"><div class="hist-avv-punkt">⚠ ${a.punkt}</div><div class="hist-avv-text">${a.text}</div><div class="hist-avv-status" style="color:${c};">${t}</div></div>`;
+      }).join('');
+      avvHTML=`<div class="hist-avv-list">${rader}</div>`;
+    }
+    return `<div class="hist-item"><h3>${l.anlaggning}</h3><div class="hist-meta"><span>${l.datum} ${l.tid}</span><span>${l.done}/${l.total} ok</span>${badge}</div>${avvHTML}<div class="export-row"><button class="export-btn" onclick="exportPDF(${i})">📄 Exportera PDF</button><button class="export-btn" onclick="exportCSV(${i})">📊 Exportera CSV</button></div></div>`;
+  }).join('');
+}
+
+function renderAvvikelser(){
+  const filterAnl=document.getElementById('avv-filter-anl').value;
+  const el=document.getElementById('avv-list');
+  const expRow=document.getElementById('export-avv-row');
+  const items=[];
+  logs.forEach((l,li)=>{
+    if(filterAnl && l.anlaggning!==filterAnl)return;
+    l.avvikelser.forEach((a,ai)=>{
+      if(avvTab==='aktiva' && a.atgardad)return;
+      if(avvTab==='atgardade' && !a.atgardad)return;
+      const cls=a.atgardad?'atgardad':'';
+      const btnCls=a.atgardad?'done':'';
+      const btnTxt=a.atgardad?`✓ Åtgärdad ${a.atgDatum}`:'Markera åtgärdad';
+      items.push(`<div class="avv-item ${cls}"><h3>${a.punkt}</h3><p>${a.text}</p><div class="meta"><span>${l.anlaggning} · ${l.datum}</span><button class="atg-btn ${btnCls}" onclick="toggleAtgardad(${li},${ai})">${btnTxt}</button></div></div>`);
+    });
+  });
+  el.innerHTML=items.length?items.join(''):'<div class="empty">Inga avvikelser att visa.</div>';
+  expRow.style.display=items.length?'block':'none';
+}
+
+function toggleAtgardad(li,ai){
+  const a=logs[li].avvikelser[ai];
+  a.atgardad=!a.atgardad;
+  a.atgDatum=a.atgardad?new Date().toLocaleDateString('sv-SE'):'';
+  save();
+  renderAvvikelser();
+}
+
+function exportPDF(i){
+  const {jsPDF}=window.jspdf;
+  const l=logs[i];
+  const doc=new jsPDF();
+  let y=20;
+  doc.setFontSize(16);doc.setFont(undefined,'bold');
+  doc.text('Ronderingsrapport',14,y);y+=8;
+  doc.setFontSize(11);doc.setFont(undefined,'normal');
+  doc.text(`Anlaggning: ${l.anlaggning}`,14,y);y+=6;
+  doc.text(`Datum: ${l.datum}  Tid: ${l.tid}`,14,y);y+=6;
+  doc.text(`Kontrollpunkter: ${l.done} av ${l.total} ok`,14,y);y+=10;
+  if(l.avvikelser.length){
+    doc.setFont(undefined,'bold');doc.text('Avvikelser:',14,y);y+=7;
+    l.avvikelser.forEach(a=>{
+      if(y>265){doc.addPage();y=20;}
+      doc.setFont(undefined,'bold');doc.setFontSize(11);
+      doc.text(`- ${a.punkt}`,14,y);y+=5;
+      doc.setFont(undefined,'normal');doc.setFontSize(10);
+      const lines=doc.splitTextToSize(a.text,178);
+      doc.text(lines,18,y);y+=lines.length*5+1;
+      const status=a.atgardad?`Atgardad: ${a.atgDatum}`:'Ej atgardad';
+      doc.setTextColor(130);doc.text(status,18,y);doc.setTextColor(0);y+=7;
+    });
+  } else {
+    doc.text('Inga avvikelser registrerades.',14,y);
+  }
+  doc.save(`rondering_${l.anlaggning.replace(/ /g,'_')}_${l.datum}.pdf`);
+}
+
+function exportCSV(i){
+  const l=logs[i];
+  const rows=[['Kategori','Punkt','Forvantad kvalitet','Avvikelse','Atgardad','Atgardsdatum']];
+  l.avvikelser.forEach(a=>rows.push([a.kategori||'',a.punkt,a.hint||'',a.text,a.atgardad?'Ja':'Nej',a.atgDatum||'']));
+  const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=`avvikelser_${l.anlaggning.replace(/ /g,'_')}_${l.datum}.csv`;a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportAvvikelserPDF(){
+  const {jsPDF}=window.jspdf;
+  const filterAnl=document.getElementById('avv-filter-anl').value;
+  const doc=new jsPDF();
+  let y=20;
+  doc.setFontSize(16);doc.setFont(undefined,'bold');
+  doc.text('Avvikelserapport',14,y);y+=8;
+  doc.setFontSize(11);doc.setFont(undefined,'normal');
+  const rubrik=filterAnl||'Alla anlaggningar';
+  doc.text(`${avvTab==='atgardade'?'Atgardade':'Aktiva'} avvikelser - ${rubrik}`,14,y);y+=10;
+  let found=false;
+  logs.forEach(l=>{
+    if(filterAnl && l.anlaggning!==filterAnl)return;
+    l.avvikelser.forEach(a=>{
+      if(avvTab==='aktiva' && a.atgardad)return;
+      if(avvTab==='atgardade' && !a.atgardad)return;
+      found=true;
+      if(y>265){doc.addPage();y=20;}
+      doc.setFont(undefined,'bold');doc.setFontSize(11);doc.text(`${a.punkt}`,14,y);y+=5;
+      doc.setFont(undefined,'normal');doc.setFontSize(10);
+      const lines=doc.splitTextToSize(a.text,178);
+      doc.text(lines,14,y);y+=lines.length*5;
+      doc.setTextColor(130);doc.text(`${l.anlaggning} - ${l.datum}${a.atgardad?' - Atgardad '+a.atgDatum:''}`,14,y);doc.setTextColor(0);y+=8;
+    });
+  });
+  if(!found)doc.text('Inga avvikelser att visa.',14,y);
+  doc.save(`avvikelser_${rubrik.replace(/ /g,'_')}_${avvTab}.pdf`);
+}
+
+document.addEventListener("DOMContentLoaded", function() { buildSelects(); });
+</script>
+</body>
+</html>
