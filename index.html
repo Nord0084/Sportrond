@@ -33,7 +33,12 @@ body { font-family: var(--font-sans); font-size: 15px; color: var(--color-text-p
 .screen { display: none; padding: 0 0 80px; }
 .screen.active { display: block; }
 .topbar { background: var(--color-background-primary); border-bottom: 0.5px solid var(--color-border-tertiary); padding: 14px 16px; position: sticky; top: 0; z-index: 10; }
+.topbar-row { display: flex; justify-content: space-between; align-items: center; }
 .topbar h1 { font-size: 16px; font-weight: 600; }
+.topbar-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.logo { font-size: 13px; color: var(--color-text-tertiary); }
+.logout-btn { font-size: 10px; color: var(--color-text-tertiary); background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }
+.user-label { font-size: 10px; color: var(--color-text-tertiary); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .navbar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--color-background-primary); border-top: 0.5px solid var(--color-border-tertiary); display: flex; padding-bottom: env(safe-area-inset-bottom); }
 .nav-btn { flex: 1; padding: 10px 2px 8px; border: none; background: transparent; cursor: pointer; font-size: 10px; color: var(--color-text-secondary); display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .nav-btn.active { color: #1D9E75; }
@@ -88,22 +93,75 @@ textarea { width: 100%; border: 0.5px solid var(--color-border-secondary); borde
 .start-screen h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
 .start-screen p { font-size: 14px; color: var(--color-text-secondary); margin-bottom: 20px; }
 .btn-start { width: 100%; background: #1D9E75; color: white; border: none; border-radius: var(--border-radius-md); padding: 15px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 14px; }
+.draft-banner { background: var(--color-background-warning); border: 0.5px solid var(--color-border-warning); border-radius: var(--border-radius-lg); padding: 14px; margin-bottom: 20px; }
+.draft-banner h3 { font-size: 14px; font-weight: 600; color: var(--color-text-warning); margin-bottom: 4px; }
+.draft-banner p { font-size: 13px; color: var(--color-text-primary); margin-bottom: 12px; }
+.draft-btns { display: flex; gap: 8px; }
+.draft-btns button { flex: 1; padding: 10px; border-radius: var(--border-radius-md); font-size: 13px; font-weight: 600; cursor: pointer; border: 0.5px solid var(--color-border-secondary); background: var(--color-background-primary); color: var(--color-text-primary); }
+.draft-btns .btn-resume { background: #1D9E75; color: white; border-color: #1D9E75; }
 .export-row { display: flex; gap: 8px; margin-top: 10px; }
 .export-btn { flex: 1; padding: 9px 10px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: var(--color-background-secondary); color: var(--color-text-primary); font-size: 12px; cursor: pointer; text-align: center; font-weight: 500; }
 .tab-pills { display: flex; gap: 8px; margin-bottom: 14px; }
 .pill { flex: 1; padding: 9px 8px; border: 0.5px solid var(--color-border-secondary); border-radius: 24px; font-size: 13px; text-align: center; cursor: pointer; background: transparent; color: var(--color-text-secondary); font-weight: 500; }
 .pill.active { background: #1D9E75; color: white; border-color: #1D9E75; }
-.logo { font-size: 13px; color: var(--color-text-tertiary); margin-top: 3px; }
+.mode-pills { margin-top: 10px; margin-bottom: 0; }
+
+/* Login overlay */
+.login-overlay { position: fixed; inset: 0; background: #f3f4f6; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
+.login-box { text-align: center; max-width: 300px; width: 100%; }
+.login-icon { font-size: 48px; margin-bottom: 16px; }
+.login-box h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+.login-box p { font-size: 14px; color: var(--color-text-secondary); margin-bottom: 28px; line-height: 1.5; }
+.btn-ms-login { width: 100%; background: #0078d4; color: white; border: none; border-radius: var(--border-radius-md); padding: 14px 20px; font-size: 15px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.btn-ms-login:active { background: #006cbd; }
+.login-error { color: #dc2626; font-size: 12px; margin-top: 14px; min-height: 18px; }
+
+/* Loading overlay */
+.loading-overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.85); z-index: 900; flex-direction: column; align-items: center; justify-content: center; gap: 14px; font-size: 14px; color: var(--color-text-secondary); }
+.loading-overlay.active { display: flex; }
+.spinner { width: 36px; height: 36px; border: 3px solid #e5e7eb; border-top-color: #1D9E75; border-radius: 50%; animation: spin 0.75s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 
+<!-- Login screen -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-box">
+    <div class="login-icon">☑️</div>
+    <h1>Sportrond</h1>
+    <p>Logga in med ditt Nacka-konto för att starta.</p>
+    <button class="btn-ms-login" onclick="login()">
+      <svg width="20" height="20" viewBox="0 0 21 21" fill="none"><rect width="10" height="10" fill="#F25022"/><rect x="11" width="10" height="10" fill="#7FBA00"/><rect y="11" width="10" height="10" fill="#00A4EF"/><rect x="11" y="11" width="10" height="10" fill="#FFB900"/></svg>
+      Logga in med Microsoft
+    </button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loading-overlay">
+  <div class="spinner"></div>
+  <span id="loading-text">Laddar...</span>
+</div>
+
 <div class="screen active" id="screen-rondering">
   <div class="topbar">
-    <h1 id="topbar-title">Välj anläggning</h1>
-    <div class="logo">Sportrond</div>
+    <div class="topbar-row">
+      <h1 id="topbar-title">Välj anläggning</h1>
+      <div class="topbar-right">
+        <div class="logo">Sportrond</div>
+        <div id="user-label" class="user-label"></div>
+        <button class="logout-btn" onclick="logout()">Logga ut</button>
+      </div>
+    </div>
+    <div id="mode-pills" class="tab-pills mode-pills">
+      <button class="pill mode-pill active" data-mode="sporthall" onclick="setMode('sporthall',this)">Sporthall</button>
+      <button class="pill mode-pill" data-mode="ishall" onclick="setMode('ishall',this)">Ishall</button>
+    </div>
   </div>
   <div id="start-view" class="start-screen">
+    <div id="draft-banner" class="draft-banner" style="display:none;"></div>
     <h2>Ny rondering</h2>
     <p>Välj anläggning för att starta checklistan.</p>
     <select id="anl-select"></select>
@@ -118,16 +176,28 @@ textarea { width: 100%; border: 0.5px solid var(--color-border-secondary); borde
 </div>
 
 <div class="screen" id="screen-historik">
-  <div class="topbar"><h1>Historik</h1></div>
+  <div class="topbar">
+    <div class="topbar-row"><h1>Historik</h1></div>
+    <div class="tab-pills mode-pills">
+      <button class="pill mode-pill active" data-mode="sporthall" onclick="setMode('sporthall',this)">Sporthall</button>
+      <button class="pill mode-pill" data-mode="ishall" onclick="setMode('ishall',this)">Ishall</button>
+    </div>
+  </div>
   <div class="section" id="hist-list"></div>
 </div>
 
 <div class="screen" id="screen-avvikelser">
-  <div class="topbar"><h1>Avvikelser</h1></div>
+  <div class="topbar">
+    <div class="topbar-row"><h1>Avvikelser</h1></div>
+    <div class="tab-pills mode-pills">
+      <button class="pill mode-pill active" data-mode="sporthall" onclick="setMode('sporthall',this)">Sporthall</button>
+      <button class="pill mode-pill" data-mode="ishall" onclick="setMode('ishall',this)">Ishall</button>
+    </div>
+  </div>
   <div class="section">
     <div class="tab-pills">
-      <button class="pill active" onclick="setAvvTab('aktiva',this)">Aktiva</button>
-      <button class="pill" onclick="setAvvTab('atgardade',this)">Åtgärdade</button>
+      <button class="pill avv-pill active" onclick="setAvvTab('aktiva',this)">Aktiva</button>
+      <button class="pill avv-pill" onclick="setAvvTab('atgardade',this)">Åtgärdade</button>
     </div>
     <div class="filter-row">
       <select id="avv-filter-anl" onchange="renderAvvikelser()"></select>
@@ -157,8 +227,249 @@ textarea { width: 100%; border: 0.5px solid var(--color-border-secondary); borde
   <button class="nav-btn" onclick="goTo('avvikelser',this)"><span class="nav-icon">⚠️</span>Avvikelser</button>
 </div>
 
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
+
+// ============================================================
+// SharePoint / Azure config
+// ============================================================
+const CLIENT_ID    = 'adaf5794-4c0e-4901-847c-bce56968a30b';
+const TENANT_ID    = '85f1def1-344e-41f0-b8fe-137f2800f31a';
+const REDIRECT_URI = 'https://nord0084.github.io/Sportrond/';
+const SP_HOST      = 'nacka.sharepoint.com';
+const SP_SITE_PATH = '/sites/Idrottsdriften-verlmningarochprotokoll';
+const GRAPH        = 'https://graph.microsoft.com/v1.0';
+
+// SharePoint list column internal names — must match your list columns exactly
+// Ronderingar columns: Title (built-in), Typ, Datum, Tid, Total, Godkanda
+// Avvikelser columns:  Title (built-in), RonderingId, Anlaggning, Typ, Kategori,
+//                      Hint, Anteckning, Datum, Atgardad (Yes/No), AtgardadDatum
+const COL_R = { typ:'Typ', datum:'Datum', tid:'Tid', total:'Total', godkanda:'Godkanda' };
+const COL_A = {
+  ronderingId:'RonderingId', anlaggning:'Anlaggning', typ:'Typ',
+  kategori:'Kategori', hint:'Hint', anteckning:'Anteckning',
+  datum:'Datum', atgardad:'Atgardad', atgardadDatum:'AtgardadDatum'
+};
+
+// ============================================================
+// MSAL setup
+// ============================================================
+const msalInstance = new msal.PublicClientApplication({
+  auth: { clientId: CLIENT_ID, authority: `https://login.microsoftonline.com/${TENANT_ID}`, redirectUri: REDIRECT_URI },
+  cache: { cacheLocation: 'sessionStorage' }
+});
+const SCOPES = ['https://graph.microsoft.com/Sites.ReadWrite.All'];
+
+async function getToken() {
+  const account = msalInstance.getAllAccounts()[0];
+  if (!account) throw new Error('not_logged_in');
+  try {
+    return (await msalInstance.acquireTokenSilent({ scopes: SCOPES, account })).accessToken;
+  } catch {
+    return (await msalInstance.acquireTokenPopup({ scopes: SCOPES })).accessToken;
+  }
+}
+
+async function login() {
+  document.getElementById('login-error').textContent = '';
+  try {
+    await msalInstance.loginPopup({ scopes: SCOPES });
+    await initApp();
+  } catch (e) {
+    document.getElementById('login-error').textContent = 'Inloggning misslyckades. Försök igen.';
+    console.error(e);
+  }
+}
+
+function logout() {
+  msalInstance.logoutPopup();
+}
+
+// ============================================================
+// Graph API helpers
+// ============================================================
+async function gFetch(path, opts = {}) {
+  const token = await getToken();
+  const url   = path.startsWith('http') ? path : GRAPH + path;
+  const res   = await fetch(url, {
+    ...opts,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => res.status);
+    throw new Error(`Graph ${res.status}: ${err}`);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+async function gGetAll(path) {
+  let url = GRAPH + path;
+  const items = [];
+  while (url) {
+    const token = await getToken();
+    const res   = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`Graph ${res.status}`);
+    const data  = await res.json();
+    items.push(...(data.value || []));
+    url = data['@odata.nextLink'] || null;
+  }
+  return items;
+}
+
+// ============================================================
+// SharePoint init
+// ============================================================
+let siteId = null, rListId = null, aListId = null;
+
+async function initSharePoint() {
+  const site  = await gFetch(`/sites/${SP_HOST}:${SP_SITE_PATH}`);
+  siteId      = site.id;
+  const lists = await gGetAll(`/sites/${siteId}/lists?$select=id,displayName`);
+  for (const l of lists) {
+    if (l.displayName === 'Ronderingar') rListId = l.id;
+    if (l.displayName === 'Avvikelser')  aListId = l.id;
+  }
+  if (!rListId || !aListId) {
+    throw new Error('Hittade inte listorna "Ronderingar" och/eller "Avvikelser" i SharePoint. Kontrollera listnamnen.');
+  }
+}
+
+// ============================================================
+// Data: load from SharePoint
+// ============================================================
+async function loadLogs() {
+  const [rItems, aItems] = await Promise.all([
+    gGetAll(`/sites/${siteId}/lists/${rListId}/items?expand=fields`),
+    gGetAll(`/sites/${siteId}/lists/${aListId}/items?expand=fields`)
+  ]);
+
+  // Group avvikelser by RonderingId
+  const avvMap = {};
+  for (const item of aItems) {
+    const f   = item.fields;
+    const rid = String(f[COL_A.ronderingId]);
+    if (!avvMap[rid]) avvMap[rid] = [];
+    avvMap[rid].push({
+      spId:     item.id,
+      kategori: f[COL_A.kategori]      || '',
+      punkt:    f.Title                 || '',
+      hint:     f[COL_A.hint]           || '',
+      text:     f[COL_A.anteckning]     || '',
+      atgardad: f[COL_A.atgardad]      || false,
+      atgDatum: f[COL_A.atgardadDatum] || ''
+    });
+  }
+
+  logs = rItems.map(item => {
+    const f = item.fields;
+    return {
+      spId:       item.id,
+      id:         parseInt(item.id),
+      created:    item.createdDateTime || '',
+      typ:        f[COL_R.typ]      || 'sporthall',
+      anlaggning: f.Title           || '',
+      datum:      f[COL_R.datum]    || '',
+      tid:        f[COL_R.tid]      || '',
+      total:      f[COL_R.total]    || 0,
+      done:       f[COL_R.godkanda] || 0,
+      avvikelser: avvMap[item.id]   || []
+    };
+  });
+
+  // Nyast först. Sorteras här i klienten — Graph stödjer inte alltid
+  // $orderby på createdDateTime för SharePoint-listor.
+  logs.sort((a, b) => b.created.localeCompare(a.created) || b.id - a.id);
+}
+
+// ============================================================
+// Data: save to SharePoint
+// ============================================================
+async function saveRondering(r) {
+  const rItem = await gFetch(`/sites/${siteId}/lists/${rListId}/items`, {
+    method: 'POST',
+    body: JSON.stringify({ fields: {
+      Title:              r.anlaggning,
+      [COL_R.typ]:        r.typ,
+      [COL_R.datum]:      r.datum,
+      [COL_R.tid]:        r.tid,
+      [COL_R.total]:      r.total,
+      [COL_R.godkanda]:   r.done
+    }})
+  });
+
+  for (const a of r.avvikelser) {
+    await gFetch(`/sites/${siteId}/lists/${aListId}/items`, {
+      method: 'POST',
+      body: JSON.stringify({ fields: {
+        Title:                   a.punkt,
+        [COL_A.ronderingId]:     parseInt(rItem.id),
+        [COL_A.anlaggning]:      r.anlaggning,
+        [COL_A.typ]:             r.typ,
+        [COL_A.kategori]:        a.kategori,
+        [COL_A.hint]:            a.hint,
+        [COL_A.anteckning]:      a.text,
+        [COL_A.datum]:           r.datum,
+        [COL_A.atgardad]:        false,
+        [COL_A.atgardadDatum]:   ''
+      }})
+    });
+  }
+}
+
+async function updateAvvikelse(avv) {
+  await gFetch(`/sites/${siteId}/lists/${aListId}/items/${avv.spId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ fields: {
+      [COL_A.atgardad]:      avv.atgardad,
+      [COL_A.atgardadDatum]: avv.atgDatum
+    }})
+  });
+}
+
+// ============================================================
+// Loading state
+// ============================================================
+function showLoading(text) {
+  document.getElementById('loading-text').textContent = text || 'Laddar...';
+  document.getElementById('loading-overlay').classList.add('active');
+}
+function hideLoading() {
+  document.getElementById('loading-overlay').classList.remove('active');
+}
+
+// ============================================================
+// App init
+// ============================================================
+async function initApp() {
+  const accounts = msalInstance.getAllAccounts();
+  if (!accounts.length) return;
+
+  try {
+    showLoading('Ansluter till SharePoint...');
+    await initSharePoint();
+    showLoading('Laddar data...');
+    await loadLogs();
+    hideLoading();
+
+    const name = accounts[0].name || accounts[0].username;
+    document.getElementById('user-label').textContent = name;
+    document.getElementById('login-overlay').style.display = 'none';
+
+    buildAnlSelect();
+    buildAvvFilter();
+    renderDraftBanner();
+  } catch (e) {
+    hideLoading();
+    document.getElementById('login-error').textContent = 'Fel: ' + e.message;
+    console.error(e);
+  }
+}
+
+// ============================================================
+// Checklist data
+// ============================================================
 const ANLAGGNINGAR = [
   'Stavsborgs sporthallar','Nacka sportcentrum Bollhall','Nacka sportcentrum Sporthall',
   'Tippens sporthall','Järla sporthall','Skuruhallen','Jensen sporthall',
@@ -167,6 +478,10 @@ const ANLAGGNINGAR = [
   'Sigfridsborgs sporthall','Myrsjö sporthall A','Boo Gårds sporthall',
   'Ektorps sporthall','Fisksätra multihall Sporthall','Fisksätra multihall Baskethall',
   'Fisksätra multihall Friidrottshall'
+];
+
+const ANLAGGNINGAR_IS = [
+  'Nacka ishall','Älta ishall','Björknäs ishall','Saltsjöbadens ishall'
 ];
 
 const KATEGORIER = [
@@ -208,80 +523,237 @@ const KATEGORIER = [
   ]}
 ];
 
-function pKey(k,p){ return k.namn+'|'+p.namn; }
+const KATEGORIER_IS = [
+  { namn:"1. Isyta & sargen", collapsed:false, punkter:[
+    {namn:"Isyta",hint:"Jämn, inga sprickor eller hål"},
+    {namn:"Sargen",hint:"Hela, stabila, inga lösa delar"},
+    {namn:"Plexiglas",hint:"Hela, rena, ordentligt fästade"},
+    {namn:"Målburar",hint:"Hela, korrekt placerade"},
+    {namn:"Linjer och markeringar",hint:"Synliga, korrekta"}
+  ]},
+  { namn:"2. Spelarplatser", collapsed:false, punkter:[
+    {namn:"Spelarboxar",hint:"Hela, rena, dörrar fungerar"},
+    {namn:"Utvisningsbås",hint:"Hela, rena, dörrar fungerar"},
+    {namn:"Avbytarbänkar",hint:"Hela, rena"},
+    {namn:"Domarentré",hint:"Fri, säker"}
+  ]},
+  { namn:"3. Teknik & kyla", collapsed:false, punkter:[
+    {namn:"Kylaggregat",hint:"Inga larm, normalt driftsläge"},
+    {namn:"Ismaskin / Zamboni",hint:"Fungerande, påfylld"},
+    {namn:"Ismaskinsgarage",hint:"Rent, säkert"},
+    {namn:"Belysning över isen",hint:"Fungerande, tillräcklig ljusstyrka"},
+    {namn:"Tidtagningstavla",hint:"Fungerar korrekt"},
+    {namn:"Ljudsystem",hint:"Fungerar, inga störningar"}
+  ]},
+  { namn:"4. Omklädningsrum & hygienutrymmen", collapsed:false, punkter:[
+    {namn:"Duschutrymmen",hint:"Rent, fungerande avlopp"},
+    {namn:"Toaletter",hint:"Rent, fungerande spolning"},
+    {namn:"Skridskoskärpning",hint:"Fungerar, säker"},
+    {namn:"Golvbrunnar",hint:"Rena, luktfria"}
+  ]},
+  { namn:"5. Publikläktare & entré", collapsed:false, punkter:[
+    {namn:"Läktare",hint:"Hela, rena, inga lösa delar"},
+    {namn:"Entréområde",hint:"Rent, halkfritt"},
+    {namn:"Belysning allmänt",hint:"Fungerande"},
+    {namn:"Utrymningsvägar",hint:"Fria, tydligt markerade"},
+    {namn:"Skyltning",hint:"Nödutgång, brandskydd, regler"}
+  ]},
+  { namn:"6. Säkerhet & brandskydd", collapsed:false, punkter:[
+    {namn:"Brandsläckare",hint:"På plats, kontrollerade"},
+    {namn:"Brandlarm",hint:"Fungerar, testade"},
+    {namn:"Första hjälpen-utrustning, hjärtstartare",hint:"Komplett, tillgänglig"},
+    {namn:"Nödutgångar",hint:"Öppningsbara, ej blockerade"}
+  ]}
+];
 
-let rondering = null;
-let logs = JSON.parse(localStorage.getItem('sportrond_v1') || '[]');
-let avvTab = 'aktiva';
+function pKey(k, p) { return k.namn + '|' + p.namn; }
 
-function save(){ localStorage.setItem('sportrond_v1', JSON.stringify(logs)); }
+let rondering    = null;
+let logs         = [];
+let avvTab       = 'aktiva';
+let currentMode  = 'sporthall';
 
-function buildSelects(){
-  const a1 = ['<option value="">— Välj anläggning —</option>',...ANLAGGNINGAR.map(a=>`<option>${a}</option>`)].join('');
-  document.getElementById('anl-select').innerHTML = a1;
-  const a2 = ['<option value="">Alla anläggningar</option>',...ANLAGGNINGAR.map(a=>`<option>${a}</option>`)].join('');
-  document.getElementById('avv-filter-anl').innerHTML = a2;
+function anlaggningar() { return currentMode === 'ishall' ? ANLAGGNINGAR_IS : ANLAGGNINGAR; }
+function kategorier()   { return currentMode === 'ishall' ? KATEGORIER_IS : KATEGORIER; }
+
+// ============================================================
+// UI: navigation & mode
+// ============================================================
+function setMode(mode, btn) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-pill').forEach(p => p.classList.toggle('active', p.dataset.mode === mode));
+  buildAnlSelect();
+  buildAvvFilter();
+  const active = document.querySelector('.screen.active').id;
+  if (active === 'screen-historik')   renderHistorik();
+  if (active === 'screen-avvikelser') renderAvvikelser();
 }
 
-function goTo(tab,btn){
-  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('screen-'+tab).classList.add('active');
+function buildAnlSelect() {
+  document.getElementById('anl-select').innerHTML =
+    ['<option value="">— Välj anläggning —</option>', ...anlaggningar().map(a => `<option>${a}</option>`)].join('');
+}
+
+function buildAvvFilter() {
+  document.getElementById('avv-filter-anl').innerHTML =
+    ['<option value="">Alla anläggningar</option>', ...anlaggningar().map(a => `<option>${a}</option>`)].join('');
+}
+
+async function goTo(tab, btn) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('screen-' + tab).classList.add('active');
   btn.classList.add('active');
-  if(tab==='historik') renderHistorik();
-  if(tab==='avvikelser') renderAvvikelser();
+  if (tab === 'historik') {
+    await refreshAndRender(renderHistorik);
+  }
+  if (tab === 'avvikelser') {
+    buildAvvFilter();
+    await refreshAndRender(renderAvvikelser);
+  }
 }
 
-function setAvvTab(t,btn){
-  avvTab=t;
-  document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+async function refreshAndRender(renderFn) {
+  try {
+    showLoading('Laddar...');
+    await loadLogs();
+    hideLoading();
+  } catch (e) {
+    hideLoading();
+    console.error(e);
+  }
+  renderFn();
+}
+
+function setAvvTab(t, btn) {
+  avvTab = t;
+  document.querySelectorAll('.avv-pill').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   renderAvvikelser();
 }
 
-function startRondering(){
-  const anl=document.getElementById('anl-select').value;
-  if(!anl){alert('Välj en anläggning först.');return;}
-  const now=new Date();
-  rondering={
-    anlaggning:anl,
-    datum:now.toLocaleDateString('sv-SE'),
-    tid:now.toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'}),
-    checks:{},noter:{}
-  };
-  KATEGORIER.forEach(k=>k.punkter.forEach(p=>{
-    const key=pKey(k,p); rondering.checks[key]=false; rondering.noter[key]='';
-  }));
-  document.getElementById('topbar-title').textContent=anl;
-  document.getElementById('start-view').style.display='none';
-  document.getElementById('check-view').style.display='block';
-  KATEGORIER.forEach(k=>k.collapsed=false);
+// ============================================================
+// Utkast: pågående rondering sparas lokalt så den överlever
+// att telefonen låses eller att sidan laddas om
+// ============================================================
+const DRAFT_KEY = 'sportrond_draft';
+
+function saveDraft() {
+  if (!rondering) return;
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(rondering));
+  } catch (e) {
+    console.warn('Kunde inte spara utkast lokalt', e);
+  }
+}
+
+function clearDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* ignoreras */ }
+}
+
+function loadDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY));
+    if (!d || !d.anlaggning || !d.checks || !d.noter) return null;
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+function renderDraftBanner() {
+  const el = document.getElementById('draft-banner');
+  const d  = loadDraft();
+  if (!d) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const total = Object.keys(d.checks).length;
+  const done  = Object.values(d.checks).filter(Boolean).length;
+  const typ   = d.typ === 'ishall' ? 'Ishall' : 'Sporthall';
+  el.style.display = 'block';
+  el.innerHTML = `
+    <h3>⚠ Pågående rondering</h3>
+    <p>${escHtml(d.anlaggning)} (${typ})<br>Startad ${escHtml(d.datum)} ${escHtml(d.tid)} · ${done} av ${total} kontrollerade</p>
+    <div class="draft-btns">
+      <button class="btn-resume" onclick="resumeDraft()">Fortsätt</button>
+      <button onclick="discardDraft()">Ta bort</button>
+    </div>`;
+}
+
+function resumeDraft() {
+  const d = loadDraft();
+  if (!d) { renderDraftBanner(); return; }
+  rondering   = d;
+  currentMode = d.typ || 'sporthall';
+  document.querySelectorAll('.mode-pill').forEach(p => p.classList.toggle('active', p.dataset.mode === currentMode));
+  buildAnlSelect();
+  buildAvvFilter();
+  openCheckView(d.anlaggning);
+}
+
+function discardDraft() {
+  if (!confirm('Ta bort den pågående ronderingen? Ifyllda punkter försvinner.')) return;
+  clearDraft();
+  renderDraftBanner();
+}
+
+// ============================================================
+// UI: rondering
+// ============================================================
+function openCheckView(anl) {
+  document.getElementById('topbar-title').textContent  = anl;
+  document.getElementById('mode-pills').style.display  = 'none';
+  document.getElementById('start-view').style.display  = 'none';
+  document.getElementById('check-view').style.display  = 'block';
+  kategorier().forEach(k => k.collapsed = false);
   renderChecklist();
 }
 
-function renderChecklist(){
-  const body=document.getElementById('checklist-body');
-  body.innerHTML='';
-  KATEGORIER.forEach(kat=>{
-    const doneInCat=kat.punkter.filter(p=>rondering.checks[pKey(kat,p)]).length;
-    const card=document.createElement('div'); card.className='card';
-    const hdr=document.createElement('div'); hdr.className='card-header';
-    hdr.innerHTML=`<span>${kat.namn}</span><span style="font-size:11px;color:#6b7280;">${doneInCat}/${kat.punkter.length} ${kat.collapsed?'▼':'▲'}</span>`;
-    hdr.onclick=()=>{kat.collapsed=!kat.collapsed;renderChecklist();};
+function startRondering() {
+  const anl = document.getElementById('anl-select').value;
+  if (!anl) { alert('Välj en anläggning först.'); return; }
+  const draft = loadDraft();
+  if (draft && !confirm(`Det finns en pågående rondering för ${draft.anlaggning}. Startar du en ny försvinner den. Fortsätta?`)) return;
+  const now = new Date();
+  rondering = {
+    typ:        currentMode,
+    anlaggning: anl,
+    datum:      now.toLocaleDateString('sv-SE'),
+    tid:        now.toLocaleTimeString('sv-SE', { hour:'2-digit', minute:'2-digit' }),
+    checks:     {},
+    noter:      {}
+  };
+  kategorier().forEach(k => k.punkter.forEach(p => {
+    const key = pKey(k, p);
+    rondering.checks[key] = false;
+    rondering.noter[key]  = '';
+  }));
+  saveDraft();
+  openCheckView(anl);
+}
+
+function renderChecklist() {
+  const body = document.getElementById('checklist-body');
+  body.innerHTML = '';
+  const kats = rondering.typ === 'ishall' ? KATEGORIER_IS : KATEGORIER;
+  kats.forEach(kat => {
+    const doneInCat = kat.punkter.filter(p => rondering.checks[pKey(kat, p)]).length;
+    const card      = document.createElement('div'); card.className = 'card';
+    const hdr       = document.createElement('div'); hdr.className  = 'card-header';
+    hdr.innerHTML   = `<span>${kat.namn}</span><span style="font-size:11px;color:#6b7280;">${doneInCat}/${kat.punkter.length} ${kat.collapsed ? '▼' : '▲'}</span>`;
+    hdr.onclick     = () => { kat.collapsed = !kat.collapsed; renderChecklist(); };
     card.appendChild(hdr);
-    if(!kat.collapsed){
-      kat.punkter.forEach(p=>{
-        const key=pKey(kat,p);
-        const checked=rondering.checks[key];
-        const hasNote=rondering.noter[key];
-        const row=document.createElement('div'); row.className='check-item';
-        row.innerHTML=`
-          <input type="checkbox" ${checked?'checked':''} onchange="toggleCheck('${esc(key)}',this.checked)">
-          <span class="check-label ${checked?'done':''}">
+    if (!kat.collapsed) {
+      kat.punkter.forEach(p => {
+        const key     = pKey(kat, p);
+        const checked = rondering.checks[key];
+        const hasNote = rondering.noter[key];
+        const row     = document.createElement('div'); row.className = 'check-item';
+        row.innerHTML = `
+          <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleCheck('${esc(key)}',this.checked)">
+          <span class="check-label ${checked ? 'done' : ''}">
             ${p.namn}
             <div class="check-hint">${p.hint}</div>
           </span>
-          <button class="avvik-btn ${hasNote?'has-note':''}" onclick="openModal('${esc(key)}','${esc(p.namn)}','${esc(p.hint)}')">${hasNote?'⚠️':'+'}</button>`;
+          <button class="avvik-btn ${hasNote ? 'has-note' : ''}" onclick="openModal('${esc(key)}','${esc(p.namn)}','${esc(p.hint)}')">${hasNote ? '⚠️' : '+'}</button>`;
         card.appendChild(row);
       });
     }
@@ -290,180 +762,237 @@ function renderChecklist(){
   updateProgress();
 }
 
-function esc(s){return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
+function esc(s) { return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 
-function toggleCheck(key,val){
-  rondering.checks[key]=val;
+// Escape text som kommer från användaren/SharePoint innan den läggs in via innerHTML
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function toggleCheck(key, val) {
+  rondering.checks[key] = val;
+  saveDraft();
   updateProgress();
-  setTimeout(renderChecklist,50);
+  setTimeout(renderChecklist, 50);
 }
 
-function updateProgress(){
-  if(!rondering)return;
-  const total=Object.keys(rondering.checks).length;
-  const done=Object.values(rondering.checks).filter(Boolean).length;
-  document.getElementById('prog').style.width=(done/total*100)+'%';
-  document.getElementById('prog-label').textContent=`${done} av ${total} kontrollerade`;
+function updateProgress() {
+  if (!rondering) return;
+  const total = Object.keys(rondering.checks).length;
+  const done  = Object.values(rondering.checks).filter(Boolean).length;
+  document.getElementById('prog').style.width       = (done / total * 100) + '%';
+  document.getElementById('prog-label').textContent = `${done} av ${total} kontrollerade`;
 }
 
-let currentKey=null;
-function openModal(key,namn,hint){
-  currentKey=key;
-  document.getElementById('modal-title').textContent=namn;
-  document.getElementById('modal-hint').textContent='Förväntat: '+hint;
-  document.getElementById('modal-input').value=rondering.noter[key]||'';
+let currentKey = null;
+function openModal(key, namn, hint) {
+  currentKey = key;
+  document.getElementById('modal-title').textContent = namn;
+  document.getElementById('modal-hint').textContent  = 'Förväntat: ' + hint;
+  document.getElementById('modal-input').value       = rondering.noter[key] || '';
   document.getElementById('avvik-modal').classList.add('open');
-  setTimeout(()=>document.getElementById('modal-input').focus(),100);
+  setTimeout(() => document.getElementById('modal-input').focus(), 100);
 }
-function closeModal(){document.getElementById('avvik-modal').classList.remove('open');currentKey=null;}
-function handleOverlayClick(e){if(e.target===document.getElementById('avvik-modal'))closeModal();}
-function saveNote(){
-  if(!currentKey)return;
-  rondering.noter[currentKey]=document.getElementById('modal-input').value.trim();
+function closeModal() { document.getElementById('avvik-modal').classList.remove('open'); currentKey = null; }
+function handleOverlayClick(e) { if (e.target === document.getElementById('avvik-modal')) closeModal(); }
+function saveNote() {
+  if (!currentKey) return;
+  rondering.noter[currentKey] = document.getElementById('modal-input').value.trim();
+  saveDraft();
   closeModal();
   renderChecklist();
 }
 
-function avslutaRondering(){
-  if(!rondering)return;
-  const total=Object.keys(rondering.checks).length;
-  const done=Object.values(rondering.checks).filter(Boolean).length;
-  const avvikelser=[];
-  KATEGORIER.forEach(kat=>kat.punkter.forEach(p=>{
-    const key=pKey(kat,p);
-    if(rondering.noter[key]){
-      avvikelser.push({kategori:kat.namn,punkt:p.namn,hint:p.hint,text:rondering.noter[key],atgardad:false,atgDatum:''});
+async function avslutaRondering() {
+  if (!rondering) return;
+  const total      = Object.keys(rondering.checks).length;
+  const done       = Object.values(rondering.checks).filter(Boolean).length;
+  const avvikelser = [];
+  const kats       = rondering.typ === 'ishall' ? KATEGORIER_IS : KATEGORIER;
+  kats.forEach(kat => kat.punkter.forEach(p => {
+    const key = pKey(kat, p);
+    if (rondering.noter[key]) {
+      avvikelser.push({ kategori: kat.namn, punkt: p.namn, hint: p.hint, text: rondering.noter[key] });
     }
   }));
-  logs.unshift({id:Date.now(),anlaggning:rondering.anlaggning,datum:rondering.datum,tid:rondering.tid,total,done,avvikelser});
-  save();
-  rondering=null;
-  document.getElementById('topbar-title').textContent='Välj anläggning';
-  document.getElementById('check-view').style.display='none';
-  document.getElementById('start-view').style.display='block';
-  document.getElementById('anl-select').value='';
-  alert('Ronderingen är sparad!');
+
+  const rData = { typ: rondering.typ, anlaggning: rondering.anlaggning, datum: rondering.datum, tid: rondering.tid, total, done, avvikelser };
+
+  try {
+    showLoading('Sparar rondering...');
+    await saveRondering(rData);
+    await loadLogs();
+    hideLoading();
+
+    clearDraft();
+    rondering = null;
+    document.getElementById('topbar-title').textContent = 'Välj anläggning';
+    document.getElementById('check-view').style.display = 'none';
+    document.getElementById('start-view').style.display = 'block';
+    document.getElementById('mode-pills').style.display = '';
+    document.getElementById('anl-select').value         = '';
+    renderDraftBanner();
+    alert('Ronderingen är sparad!');
+  } catch (e) {
+    hideLoading();
+    alert('Fel vid sparning: ' + e.message);
+    console.error(e);
+  }
 }
 
-function renderHistorik(){
-  const el=document.getElementById('hist-list');
-  if(!logs.length){el.innerHTML='<div class="empty">Inga ronderingar sparade ännu.</div>';return;}
-  el.innerHTML=logs.map((l,i)=>{
-    const avvCount=l.avvikelser.length;
-    const atgCount=l.avvikelser.filter(a=>a.atgardad).length;
-    let badge=avvCount===0?`<span class="badge badge-ok">Inga avvikelser</span>`:`<span class="badge badge-avvik">${avvCount} avvik.</span>`;
-    if(atgCount>0) badge+=` <span class="badge badge-atg">${atgCount} åtg.</span>`;
-    let avvHTML='';
-    if(avvCount>0){
-      const rader=l.avvikelser.map(a=>{
-        const c=a.atgardad?'var(--color-text-success)':'var(--color-text-warning)';
-        const t=a.atgardad?`✓ Åtgärdad ${a.atgDatum}`:'Ej åtgärdad';
-        return `<div class="hist-avv-row"><div class="hist-avv-punkt">⚠ ${a.punkt}</div><div class="hist-avv-text">${a.text}</div><div class="hist-avv-status" style="color:${c};">${t}</div></div>`;
+// ============================================================
+// UI: historik
+// ============================================================
+function renderHistorik() {
+  const el       = document.getElementById('hist-list');
+  const filtered = logs.map((l, i) => ({ l, i })).filter(({ l }) => (l.typ || 'sporthall') === currentMode);
+  if (!filtered.length) { el.innerHTML = '<div class="empty">Inga ronderingar sparade ännu.</div>'; return; }
+  el.innerHTML = filtered.map(({ l, i }) => {
+    const avvCount = l.avvikelser.length;
+    const atgCount = l.avvikelser.filter(a => a.atgardad).length;
+    let badge = avvCount === 0
+      ? `<span class="badge badge-ok">Inga avvikelser</span>`
+      : `<span class="badge badge-avvik">${avvCount} avvik.</span>`;
+    if (atgCount > 0) badge += ` <span class="badge badge-atg">${atgCount} åtg.</span>`;
+    let avvHTML = '';
+    if (avvCount > 0) {
+      const rader = l.avvikelser.map(a => {
+        const c = a.atgardad ? 'var(--color-text-success)' : 'var(--color-text-warning)';
+        const t = a.atgardad ? `✓ Åtgärdad ${escHtml(a.atgDatum)}` : 'Ej åtgärdad';
+        return `<div class="hist-avv-row"><div class="hist-avv-punkt">⚠ ${escHtml(a.punkt)}</div><div class="hist-avv-text">${escHtml(a.text)}</div><div class="hist-avv-status" style="color:${c};">${t}</div></div>`;
       }).join('');
-      avvHTML=`<div class="hist-avv-list">${rader}</div>`;
+      avvHTML = `<div class="hist-avv-list">${rader}</div>`;
     }
-    return `<div class="hist-item"><h3>${l.anlaggning}</h3><div class="hist-meta"><span>${l.datum} ${l.tid}</span><span>${l.done}/${l.total} ok</span>${badge}</div>${avvHTML}<div class="export-row"><button class="export-btn" onclick="exportPDF(${i})">📄 Exportera PDF</button><button class="export-btn" onclick="exportCSV(${i})">📊 Exportera CSV</button></div></div>`;
+    return `<div class="hist-item"><h3>${escHtml(l.anlaggning)}</h3><div class="hist-meta"><span>${escHtml(l.datum)} ${escHtml(l.tid)}</span><span>${l.done}/${l.total} ok</span>${badge}</div>${avvHTML}<div class="export-row"><button class="export-btn" onclick="exportPDF(${i})">📄 Exportera PDF</button><button class="export-btn" onclick="exportCSV(${i})">📊 Exportera CSV</button></div></div>`;
   }).join('');
 }
 
-function renderAvvikelser(){
-  const filterAnl=document.getElementById('avv-filter-anl').value;
-  const el=document.getElementById('avv-list');
-  const expRow=document.getElementById('export-avv-row');
-  const items=[];
-  logs.forEach((l,li)=>{
-    if(filterAnl && l.anlaggning!==filterAnl)return;
-    l.avvikelser.forEach((a,ai)=>{
-      if(avvTab==='aktiva' && a.atgardad)return;
-      if(avvTab==='atgardade' && !a.atgardad)return;
-      const cls=a.atgardad?'atgardad':'';
-      const btnCls=a.atgardad?'done':'';
-      const btnTxt=a.atgardad?`✓ Åtgärdad ${a.atgDatum}`:'Markera åtgärdad';
-      items.push(`<div class="avv-item ${cls}"><h3>${a.punkt}</h3><p>${a.text}</p><div class="meta"><span>${l.anlaggning} · ${l.datum}</span><button class="atg-btn ${btnCls}" onclick="toggleAtgardad(${li},${ai})">${btnTxt}</button></div></div>`);
+// ============================================================
+// UI: avvikelser
+// ============================================================
+function renderAvvikelser() {
+  const filterAnl = document.getElementById('avv-filter-anl').value;
+  const el        = document.getElementById('avv-list');
+  const expRow    = document.getElementById('export-avv-row');
+  const items     = [];
+  logs.forEach((l, li) => {
+    if ((l.typ || 'sporthall') !== currentMode) return;
+    if (filterAnl && l.anlaggning !== filterAnl) return;
+    l.avvikelser.forEach((a, ai) => {
+      if (avvTab === 'aktiva'    &&  a.atgardad) return;
+      if (avvTab === 'atgardade' && !a.atgardad) return;
+      const cls    = a.atgardad ? 'atgardad' : '';
+      const btnCls = a.atgardad ? 'done' : '';
+      const btnTxt = a.atgardad ? `✓ Åtgärdad ${escHtml(a.atgDatum)}` : 'Markera åtgärdad';
+      items.push(`<div class="avv-item ${cls}"><h3>${escHtml(a.punkt)}</h3><p>${escHtml(a.text)}</p><div class="meta"><span>${escHtml(l.anlaggning)} · ${escHtml(l.datum)}</span><button class="atg-btn ${btnCls}" onclick="toggleAtgardad(${li},${ai})">${btnTxt}</button></div></div>`);
     });
   });
-  el.innerHTML=items.length?items.join(''):'<div class="empty">Inga avvikelser att visa.</div>';
-  expRow.style.display=items.length?'block':'none';
+  el.innerHTML     = items.length ? items.join('') : '<div class="empty">Inga avvikelser att visa.</div>';
+  expRow.style.display = items.length ? 'block' : 'none';
 }
 
-function toggleAtgardad(li,ai){
-  const a=logs[li].avvikelser[ai];
-  a.atgardad=!a.atgardad;
-  a.atgDatum=a.atgardad?new Date().toLocaleDateString('sv-SE'):'';
-  save();
-  renderAvvikelser();
+async function toggleAtgardad(li, ai) {
+  const a         = logs[li].avvikelser[ai];
+  const wasAtg    = a.atgardad;
+  const wasDatum  = a.atgDatum;
+  a.atgardad      = !a.atgardad;
+  a.atgDatum      = a.atgardad ? new Date().toLocaleDateString('sv-SE') : '';
+  try {
+    showLoading('Uppdaterar...');
+    await updateAvvikelse(a);
+    hideLoading();
+    renderAvvikelser();
+  } catch (e) {
+    hideLoading();
+    alert('Fel vid uppdatering: ' + e.message);
+    a.atgardad = wasAtg;
+    a.atgDatum = wasDatum;
+    renderAvvikelser();
+  }
 }
 
-function exportPDF(i){
-  const {jsPDF}=window.jspdf;
-  const l=logs[i];
-  const doc=new jsPDF();
-  let y=20;
-  doc.setFontSize(16);doc.setFont(undefined,'bold');
-  doc.text('Ronderingsrapport',14,y);y+=8;
-  doc.setFontSize(11);doc.setFont(undefined,'normal');
-  doc.text(`Anlaggning: ${l.anlaggning}`,14,y);y+=6;
-  doc.text(`Datum: ${l.datum}  Tid: ${l.tid}`,14,y);y+=6;
-  doc.text(`Kontrollpunkter: ${l.done} av ${l.total} ok`,14,y);y+=10;
-  if(l.avvikelser.length){
-    doc.setFont(undefined,'bold');doc.text('Avvikelser:',14,y);y+=7;
-    l.avvikelser.forEach(a=>{
-      if(y>265){doc.addPage();y=20;}
-      doc.setFont(undefined,'bold');doc.setFontSize(11);
-      doc.text(`- ${a.punkt}`,14,y);y+=5;
-      doc.setFont(undefined,'normal');doc.setFontSize(10);
-      const lines=doc.splitTextToSize(a.text,178);
-      doc.text(lines,18,y);y+=lines.length*5+1;
-      const status=a.atgardad?`Atgardad: ${a.atgDatum}`:'Ej atgardad';
-      doc.setTextColor(130);doc.text(status,18,y);doc.setTextColor(0);y+=7;
+// ============================================================
+// Export: PDF & CSV
+// ============================================================
+function exportPDF(i) {
+  const { jsPDF } = window.jspdf;
+  const l         = logs[i];
+  const doc       = new jsPDF();
+  let y = 20;
+  doc.setFontSize(16); doc.setFont(undefined, 'bold');
+  doc.text('Ronderingsrapport', 14, y); y += 8;
+  doc.setFontSize(11); doc.setFont(undefined, 'normal');
+  doc.text(`Anlaggning: ${l.anlaggning}`, 14, y); y += 6;
+  doc.text(`Datum: ${l.datum}  Tid: ${l.tid}`, 14, y); y += 6;
+  doc.text(`Kontrollpunkter: ${l.done} av ${l.total} ok`, 14, y); y += 10;
+  if (l.avvikelser.length) {
+    doc.setFont(undefined, 'bold'); doc.text('Avvikelser:', 14, y); y += 7;
+    l.avvikelser.forEach(a => {
+      if (y > 265) { doc.addPage(); y = 20; }
+      doc.setFont(undefined, 'bold'); doc.setFontSize(11);
+      doc.text(`- ${a.punkt}`, 14, y); y += 5;
+      doc.setFont(undefined, 'normal'); doc.setFontSize(10);
+      const lines = doc.splitTextToSize(a.text, 178);
+      doc.text(lines, 18, y); y += lines.length * 5 + 1;
+      const status = a.atgardad ? `Atgardad: ${a.atgDatum}` : 'Ej atgardad';
+      doc.setTextColor(130); doc.text(status, 18, y); doc.setTextColor(0); y += 7;
     });
   } else {
-    doc.text('Inga avvikelser registrerades.',14,y);
+    doc.text('Inga avvikelser registrerades.', 14, y);
   }
-  doc.save(`rondering_${l.anlaggning.replace(/ /g,'_')}_${l.datum}.pdf`);
+  doc.save(`rondering_${l.anlaggning.replace(/ /g, '_')}_${l.datum}.pdf`);
 }
 
-function exportCSV(i){
-  const l=logs[i];
-  const rows=[['Kategori','Punkt','Forvantad kvalitet','Avvikelse','Atgardad','Atgardsdatum']];
-  l.avvikelser.forEach(a=>rows.push([a.kategori||'',a.punkt,a.hint||'',a.text,a.atgardad?'Ja':'Nej',a.atgDatum||'']));
-  const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download=`avvikelser_${l.anlaggning.replace(/ /g,'_')}_${l.datum}.csv`;a.click();
+function exportCSV(i) {
+  const l    = logs[i];
+  const rows = [['Kategori', 'Punkt', 'Forvantad kvalitet', 'Avvikelse', 'Atgardad', 'Atgardsdatum']];
+  l.avvikelser.forEach(a => rows.push([a.kategori || '', a.punkt, a.hint || '', a.text, a.atgardad ? 'Ja' : 'Nej', a.atgDatum || '']));
+  const csv  = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a'); a.href = url; a.download = `avvikelser_${l.anlaggning.replace(/ /g, '_')}_${l.datum}.csv`; a.click();
   URL.revokeObjectURL(url);
 }
 
-function exportAvvikelserPDF(){
-  const {jsPDF}=window.jspdf;
-  const filterAnl=document.getElementById('avv-filter-anl').value;
-  const doc=new jsPDF();
-  let y=20;
-  doc.setFontSize(16);doc.setFont(undefined,'bold');
-  doc.text('Avvikelserapport',14,y);y+=8;
-  doc.setFontSize(11);doc.setFont(undefined,'normal');
-  const rubrik=filterAnl||'Alla anlaggningar';
-  doc.text(`${avvTab==='atgardade'?'Atgardade':'Aktiva'} avvikelser - ${rubrik}`,14,y);y+=10;
-  let found=false;
-  logs.forEach(l=>{
-    if(filterAnl && l.anlaggning!==filterAnl)return;
-    l.avvikelser.forEach(a=>{
-      if(avvTab==='aktiva' && a.atgardad)return;
-      if(avvTab==='atgardade' && !a.atgardad)return;
-      found=true;
-      if(y>265){doc.addPage();y=20;}
-      doc.setFont(undefined,'bold');doc.setFontSize(11);doc.text(`${a.punkt}`,14,y);y+=5;
-      doc.setFont(undefined,'normal');doc.setFontSize(10);
-      const lines=doc.splitTextToSize(a.text,178);
-      doc.text(lines,14,y);y+=lines.length*5;
-      doc.setTextColor(130);doc.text(`${l.anlaggning} - ${l.datum}${a.atgardad?' - Atgardad '+a.atgDatum:''}`,14,y);doc.setTextColor(0);y+=8;
+function exportAvvikelserPDF() {
+  const { jsPDF }   = window.jspdf;
+  const filterAnl   = document.getElementById('avv-filter-anl').value;
+  const doc         = new jsPDF();
+  let y = 20;
+  doc.setFontSize(16); doc.setFont(undefined, 'bold');
+  doc.text('Avvikelserapport', 14, y); y += 8;
+  doc.setFontSize(11); doc.setFont(undefined, 'normal');
+  const rubrik = filterAnl || 'Alla anlaggningar';
+  doc.text(`${avvTab === 'atgardade' ? 'Atgardade' : 'Aktiva'} avvikelser - ${rubrik}`, 14, y); y += 10;
+  let found = false;
+  logs.forEach(l => {
+    if ((l.typ || 'sporthall') !== currentMode) return;
+    if (filterAnl && l.anlaggning !== filterAnl) return;
+    l.avvikelser.forEach(a => {
+      if (avvTab === 'aktiva'    &&  a.atgardad) return;
+      if (avvTab === 'atgardade' && !a.atgardad) return;
+      found = true;
+      if (y > 265) { doc.addPage(); y = 20; }
+      doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.text(`${a.punkt}`, 14, y); y += 5;
+      doc.setFont(undefined, 'normal'); doc.setFontSize(10);
+      const lines = doc.splitTextToSize(a.text, 178);
+      doc.text(lines, 14, y); y += lines.length * 5;
+      doc.setTextColor(130); doc.text(`${l.anlaggning} - ${l.datum}${a.atgardad ? ' - Atgardad ' + a.atgDatum : ''}`, 14, y); doc.setTextColor(0); y += 8;
     });
   });
-  if(!found)doc.text('Inga avvikelser att visa.',14,y);
-  doc.save(`avvikelser_${rubrik.replace(/ /g,'_')}_${avvTab}.pdf`);
+  if (!found) doc.text('Inga avvikelser att visa.', 14, y);
+  doc.save(`avvikelser_${rubrik.replace(/ /g, '_')}_${avvTab}.pdf`);
 }
 
-document.addEventListener("DOMContentLoaded", function() { buildSelects(); });
+// ============================================================
+// Boot
+// ============================================================
+document.addEventListener('DOMContentLoaded', async () => {
+  await msalInstance.handleRedirectPromise().catch(() => {});
+  await initApp();
+});
 </script>
 </body>
 </html>
