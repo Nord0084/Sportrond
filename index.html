@@ -337,6 +337,29 @@ async function initSharePoint() {
 }
 
 // ============================================================
+// Datum-hantering
+// Kolumnerna Datum och AtgardadDatum är av typen "Datum och tid".
+// Graph vill ha ISO 8601, och ett tomt värde måste skickas som null —
+// en tom sträng ger fel 400. Tiden ankras på 12:00 UTC så att
+// kalenderdatumet aldrig hoppar en dag vid tidszonsomvandling
+// (viktigt för ronderingar sena kvällar och tidiga morgnar).
+// ============================================================
+function spDatum(d) {
+  const y   = d.getFullYear();
+  const m   = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}T12:00:00Z`;
+}
+
+// Visningsdatum (YYYY-MM-DD), oavsett om värdet kommer tillbaka som
+// ISO-tidsstämpel eller som ren text
+function visaDatum(v) {
+  if (!v) return '';
+  const s = String(v);
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : s;
+}
+
+// ============================================================
 // Data: load from SharePoint
 // ============================================================
 async function loadLogs() {
@@ -358,7 +381,7 @@ async function loadLogs() {
       hint:     f[COL_A.hint]           || '',
       text:     f[COL_A.anteckning]     || '',
       atgardad: f[COL_A.atgardad]      || false,
-      atgDatum: f[COL_A.atgardadDatum] || ''
+      atgDatum: visaDatum(f[COL_A.atgardadDatum])
     });
   }
 
@@ -370,7 +393,7 @@ async function loadLogs() {
       created:    item.createdDateTime || '',
       typ:        f[COL_R.typ]      || 'sporthall',
       anlaggning: f.Title           || '',
-      datum:      f[COL_R.datum]    || '',
+      datum:      visaDatum(f[COL_R.datum]),
       tid:        f[COL_R.tid]      || '',
       total:      f[COL_R.total]    || 0,
       done:       f[COL_R.godkanda] || 0,
@@ -392,7 +415,7 @@ async function saveRondering(r) {
     body: JSON.stringify({ fields: {
       Title:              r.anlaggning,
       [COL_R.typ]:        r.typ,
-      [COL_R.datum]:      r.datum,
+      [COL_R.datum]:      r.datumISO,
       [COL_R.tid]:        r.tid,
       [COL_R.total]:      r.total,
       [COL_R.godkanda]:   r.done
@@ -410,9 +433,9 @@ async function saveRondering(r) {
         [COL_A.kategori]:        a.kategori,
         [COL_A.hint]:            a.hint,
         [COL_A.anteckning]:      a.text,
-        [COL_A.datum]:           r.datum,
+        [COL_A.datum]:           r.datumISO,
         [COL_A.atgardad]:        false,
-        [COL_A.atgardadDatum]:   ''
+        [COL_A.atgardadDatum]:   null
       }})
     });
   }
@@ -423,7 +446,7 @@ async function updateAvvikelse(avv) {
     method: 'PATCH',
     body: JSON.stringify({ fields: {
       [COL_A.atgardad]:      avv.atgardad,
-      [COL_A.atgardadDatum]: avv.atgDatum
+      [COL_A.atgardadDatum]: avv.atgardad ? spDatum(new Date()) : null
     }})
   });
 }
@@ -717,6 +740,7 @@ function startRondering() {
     typ:        currentMode,
     anlaggning: anl,
     datum:      now.toLocaleDateString('sv-SE'),
+    datumISO:   spDatum(now),
     tid:        now.toLocaleTimeString('sv-SE', { hour:'2-digit', minute:'2-digit' }),
     checks:     {},
     noter:      {}
@@ -818,7 +842,15 @@ async function avslutaRondering() {
     }
   }));
 
-  const rData = { typ: rondering.typ, anlaggning: rondering.anlaggning, datum: rondering.datum, tid: rondering.tid, total, done, avvikelser };
+  const rData = {
+    typ:        rondering.typ,
+    anlaggning: rondering.anlaggning,
+    datum:      rondering.datum,
+    // Äldre utkast (sparade innan datumISO fanns) saknar fältet
+    datumISO:   rondering.datumISO || spDatum(new Date()),
+    tid:        rondering.tid,
+    total, done, avvikelser
+  };
 
   try {
     showLoading('Sparar rondering...');
