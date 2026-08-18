@@ -227,7 +227,9 @@ textarea { width: 100%; border: 0.5px solid var(--color-border-secondary); borde
   <button class="nav-btn" onclick="goTo('avvikelser',this)"><span class="nav-icon">⚠️</span>Avvikelser</button>
 </div>
 
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<!-- OBS: 2.38.2 är den sista v2-versionen som finns på alcdn.msauth.net.
+     2.38.3 finns på npm men ger 404 här, vilket tar ner hela appen. -->
+<script src="https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 
@@ -255,10 +257,20 @@ const COL_A = {
 // ============================================================
 // MSAL setup
 // ============================================================
-const msalInstance = new msal.PublicClientApplication({
+// Laddas MSAL inte (CDN nere, fel version, blockerat nät) kraschar ett
+// oskyddat `new msal.…` här — och då körs ingenting i resten av skriptet,
+// inte ens felhanteringen. Därför den här kontrollen: appen förblir
+// laddad och kan berätta vad som är fel.
+const MSAL_LADDAD = typeof msal !== 'undefined';
+const msalInstance = MSAL_LADDAD ? new msal.PublicClientApplication({
   auth: { clientId: CLIENT_ID, authority: `https://login.microsoftonline.com/${TENANT_ID}`, redirectUri: REDIRECT_URI },
   cache: { cacheLocation: 'sessionStorage' }
-});
+}) : null;
+
+function visaLaddfel() {
+  document.getElementById('login-error').textContent =
+    'Kunde inte ladda inloggningsbiblioteket (MSAL) från Microsofts CDN. Kontrollera nätverket och ladda om sidan.';
+}
 const SCOPES = ['https://graph.microsoft.com/Sites.ReadWrite.All'];
 
 async function getToken() {
@@ -273,11 +285,15 @@ async function getToken() {
 
 async function login() {
   document.getElementById('login-error').textContent = '';
+  if (!msalInstance) { visaLaddfel(); return; }
   try {
     await msalInstance.loginPopup({ scopes: SCOPES });
     await initApp();
   } catch (e) {
-    document.getElementById('login-error').textContent = 'Inloggning misslyckades. Försök igen.';
+    // Visa felkoden direkt på skärmen — annars syns AADSTS-koden bara i
+    // konsolen, vilket ingen har uppe på en telefon ute i en hall.
+    const kod = e.errorCode ? ` (${e.errorCode})` : '';
+    document.getElementById('login-error').textContent = `Inloggning misslyckades${kod}. Försök igen.`;
     console.error(e);
   }
 }
@@ -948,7 +964,16 @@ async function toggleAtgardad(li, ai) {
 // ============================================================
 // Export: PDF & CSV
 // ============================================================
+// Samma sak som med MSAL: faller jsPDF-CDN:en händer annars bara ingenting
+// när man trycker på exportknappen.
+function harJsPDF() {
+  if (window.jspdf) return true;
+  alert('PDF-biblioteket kunde inte laddas. Kontrollera nätverket och ladda om sidan.');
+  return false;
+}
+
 function exportPDF(i) {
+  if (!harJsPDF()) return;
   const { jsPDF } = window.jspdf;
   const l         = logs[i];
   const doc       = new jsPDF();
@@ -989,6 +1014,7 @@ function exportCSV(i) {
 }
 
 function exportAvvikelserPDF() {
+  if (!harJsPDF()) return;
   const { jsPDF }   = window.jspdf;
   const filterAnl   = document.getElementById('avv-filter-anl').value;
   const doc         = new jsPDF();
@@ -1022,6 +1048,7 @@ function exportAvvikelserPDF() {
 // Boot
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
+  if (!msalInstance) { visaLaddfel(); return; }
   await msalInstance.handleRedirectPromise().catch(() => {});
   await initApp();
 });
