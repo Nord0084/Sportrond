@@ -101,6 +101,7 @@ textarea { width: 100%; border: 0.5px solid var(--color-border-secondary); borde
 .draft-btns .btn-resume { background: #1D9E75; color: white; border-color: #1D9E75; }
 .export-row { display: flex; gap: 8px; margin-top: 10px; }
 .export-btn { flex: 1; padding: 9px 10px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: var(--color-background-secondary); color: var(--color-text-primary); font-size: 12px; cursor: pointer; text-align: center; font-weight: 500; }
+.export-btn.del-btn { color: #dc2626; border-color: #fca5a5; background: transparent; }
 .tab-pills { display: flex; gap: 8px; margin-bottom: 14px; }
 .pill { flex: 1; padding: 9px 8px; border: 0.5px solid var(--color-border-secondary); border-radius: 24px; font-size: 13px; text-align: center; cursor: pointer; background: transparent; color: var(--color-text-secondary); font-weight: 500; }
 .pill.active { background: #1D9E75; color: white; border-color: #1D9E75; }
@@ -467,6 +468,24 @@ async function saveRondering(r) {
       }})
     });
   }
+}
+
+// Avvikelserna först. De hänger ihop med ronden bara via RonderingId —
+// SharePoint har ingen kaskad. Dör vi halvvägs är det bättre att ronden
+// står kvar med färre avvikelser än att avvikelser blir föräldralösa och
+// omöjliga att hitta tillbaka till.
+async function deleteRondering(l) {
+  for (const a of l.avvikelser) {
+    if (a.spId) await gFetch(`/sites/${siteId}/lists/${aListId}/items/${a.spId}`, { method: 'DELETE' });
+  }
+  await gFetch(`/sites/${siteId}/lists/${rListId}/items/${l.id}`, { method: 'DELETE' });
+}
+
+async function updateAvvikelseText(avv) {
+  await gFetch(`/sites/${siteId}/lists/${aListId}/items/${avv.spId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ fields: { [COL_A.anteckning]: avv.text } })
+  });
 }
 
 async function updateAvvikelse(avv) {
@@ -838,18 +857,87 @@ function updateProgress() {
   document.getElementById('prog-label').textContent = `${done} av ${total} kontrollerade`;
 }
 
-let currentKey = null;
+let currentKey    = null;
+let redigerarAvv  = null;   // {li, ai} när modalen redigerar en SPARAD avvikelse
+
 function openModal(key, namn, hint) {
-  currentKey = key;
+  currentKey   = key;
+  redigerarAvv = null;
   document.getElementById('modal-title').textContent = namn;
   document.getElementById('modal-hint').textContent  = 'Förväntat: ' + hint;
   document.getElementById('modal-input').value       = rondering.noter[key] || '';
   document.getElementById('avvik-modal').classList.add('open');
   setTimeout(() => document.getElementById('modal-input').focus(), 100);
 }
-function closeModal() { document.getElementById('avvik-modal').classList.remove('open'); currentKey = null; }
+function closeModal() { document.getElementById('avvik-modal').classList.remove('open'); currentKey = null; redigerarAvv = null; }
 function handleOverlayClick(e) { if (e.target === document.getElementById('avvik-modal')) closeModal(); }
+// Samma modal används för två saker: en anteckning under pågående rond
+// (lever i utkastet tills ronden sparas) och en redan sparad avvikelse
+// (ska skrivas till SharePoint direkt). redigerarAvv skiljer dem åt.
+function openAvvEdit(li, ai) {
+  const l = logs[li], a = l.avvikelser[ai];
+  redigerarAvv = { li, ai };
+  currentKey   = null;
+  document.getElementById('modal-title').textContent = a.punkt;
+  document.getElementById('modal-hint').textContent  = `${l.anlaggning} · ${l.datum}`;
+  document.getElementById('modal-input').value       = a.text || '';
+  document.getElementById('avvik-modal').classList.add('open');
+  setTimeout(() => document.getElementById('modal-input').focus(), 100);
+}
+
+async function sparaAvvText() {
+  const { li, ai } = redigerarAvv;
+  const a   = logs[li].avvikelser[ai];
+  const ny  = document.getElementById('modal-input').value.trim();
+  if (!ny) {
+    alert('Texten kan inte vara tom. Vill du bli av med avvikelsen helt får ronderingen tas bort i Historik.');
+    return;
+  }
+  if (ny === a.text) { closeModal(); return; }
+
+  const gammal = a.text;
+  a.text = ny;
+  closeModal();
+  try {
+    showLoading('Sparar...');
+    await updateAvvikelseText(a);
+    hideLoading();
+  } catch (e) {
+    // Tillbaka till det SharePoint faktiskt har, annars visar appen en
+    // text som aldrig skrevs.
+    a.text = gammal;
+    hideLoading();
+    alert('Kunde inte spara texten: ' + e.message);
+    console.error(e);
+  }
+  renderAvvikelser();
+  renderHistorik();
+}
+
+async function taBortRondering(i) {
+  const l = logs[i];
+  if (!l) return;
+  const antal = l.avvikelser.length;
+  if (!confirm(`Ta bort ronderingen för ${l.anlaggning} ${l.datum} ${l.tid}?` +
+               (antal ? `\n\nÄven ${antal} avvikelse${antal === 1 ? '' : 'r'} tas bort.` : '') +
+               '\n\nGår inte att ångra i appen. Posterna hamnar i SharePoints papperskorg.')) return;
+  try {
+    showLoading('Tar bort...');
+    await deleteRondering(l);
+    logs.splice(i, 1);
+    hideLoading();
+    buildAvvFilter();
+    renderHistorik();
+    renderAvvikelser();
+  } catch (e) {
+    hideLoading();
+    alert('Kunde inte ta bort: ' + e.message);
+    console.error(e);
+  }
+}
+
 function saveNote() {
+  if (redigerarAvv) { sparaAvvText(); return; }
   if (!currentKey) return;
   rondering.noter[currentKey] = document.getElementById('modal-input').value.trim();
   saveDraft();
@@ -925,7 +1013,7 @@ function renderHistorik() {
       }).join('');
       avvHTML = `<div class="hist-avv-list">${rader}</div>`;
     }
-    return `<div class="hist-item"><h3>${escHtml(l.anlaggning)}</h3><div class="hist-meta"><span>${escHtml(l.datum)} ${escHtml(l.tid)}</span><span>${l.done}/${l.total} ok</span>${badge}</div>${avvHTML}<div class="export-row"><button class="export-btn" onclick="exportPDF(${i})">📄 Exportera PDF</button><button class="export-btn" onclick="exportCSV(${i})">📊 Exportera CSV</button></div></div>`;
+    return `<div class="hist-item"><h3>${escHtml(l.anlaggning)}</h3><div class="hist-meta"><span>${escHtml(l.datum)} ${escHtml(l.tid)}</span><span>${l.done}/${l.total} ok</span>${badge}</div>${avvHTML}<div class="export-row"><button class="export-btn" onclick="exportPDF(${i})">📄 Exportera PDF</button><button class="export-btn" onclick="exportCSV(${i})">📊 Exportera CSV</button><button class="export-btn del-btn" onclick="taBortRondering(${i})">🗑 Ta bort</button></div></div>`;
   }).join('');
 }
 
@@ -946,7 +1034,7 @@ function renderAvvikelser() {
       const cls    = a.atgardad ? 'atgardad' : '';
       const btnCls = a.atgardad ? 'done' : '';
       const btnTxt = a.atgardad ? `✓ Åtgärdad ${escHtml(a.atgDatum)}` : 'Markera åtgärdad';
-      items.push(`<div class="avv-item ${cls}"><h3>${escHtml(a.punkt)}</h3><p>${escHtml(a.text)}</p><div class="meta"><span>${escHtml(l.anlaggning)} · ${escHtml(l.datum)}</span><button class="atg-btn ${btnCls}" onclick="toggleAtgardad(${li},${ai})">${btnTxt}</button></div></div>`);
+      items.push(`<div class="avv-item ${cls}"><h3>${escHtml(a.punkt)}</h3><p>${escHtml(a.text)}</p><div class="meta"><span>${escHtml(l.anlaggning)} · ${escHtml(l.datum)}</span><button class="atg-btn" onclick="openAvvEdit(${li},${ai})">✏️ Ändra text</button><button class="atg-btn ${btnCls}" onclick="toggleAtgardad(${li},${ai})">${btnTxt}</button></div></div>`);
     });
   });
   el.innerHTML     = items.length ? items.join('') : '<div class="empty">Inga avvikelser att visa.</div>';
