@@ -84,7 +84,7 @@ const emptyWeek = () => ({
 });
 
 // Betongplattans lasermätning — global (plattan ändras inte vecka till vecka).
-// offsets: höjd per punkt i cm relativt referenspunkten (högsta = 0, övriga negativa).
+// offsets: höjd per punkt i mm relativt referenspunkten (högsta = 0, övriga negativa).
 const emptySlab = () => {
   const offsets = {};
   ALL_POINTS.forEach(p => (offsets[p.id] = ""));
@@ -102,10 +102,10 @@ const getWeekNumber = (d) => {
 function getColor(val) {
   const v = parseFloat(val);
   if (isNaN(v)) return "#bfdbfe";
-  if (v < 2.0) return "#ef4444";
-  if (v < 2.5) return "#f97316";
-  if (v < 3.0) return "#facc15";
-  if (v < 4.0) return "#4ade80";
+  if (v < 20) return "#ef4444";
+  if (v < 25) return "#f97316";
+  if (v < 30) return "#facc15";
+  if (v < 40) return "#4ade80";
   return "#0284c7";
 }
 
@@ -128,7 +128,17 @@ const SWEDISH_NUMS = {
   "otto": "8", "otta": "8", "otha": "8", "auta": "8", "eta": "8", "ata": "8", "otan": "8",
   "twa": "2", "tvah": "2", "fira": "4", "fura": "4", "vera": "4", "seya": "4", "seeya": "4",
 };
-const DECIMAL_WORDS = ["komma", "punkt", "och", "point"];
+// Tvåsiffriga tal, eftersom mätvärdena är millimeter. "komma" och "punkt"
+// finns inte längre med som decimaltecken: säger någon av gammal vana
+// "tre komma fem" faller det ut som 35, vilket är just vad 3,5 cm är i mm.
+const ENTAL = { "ett":1, "en":1, "två":2, "tva":2, "tre":3, "fyra":4, "fem":5,
+                "sex":6, "sju":7, "åtta":8, "atta":8, "nio":9 };
+const TIOTAL = {
+  "tio":10, "elva":11, "tolv":12, "tretton":13, "fjorton":14, "femton":15,
+  "sexton":16, "sjutton":17, "arton":18, "aderton":18, "nitton":19,
+  "tjugo":20, "trettio":30, "fyrtio":40, "förtio":40, "fyrtti":40, "femtio":50,
+  "sextio":60, "sjuttio":70, "åttio":80, "attio":80, "nittio":90, "hundra":100,
+};
 
 const PHRASE_MAP = [
   [/see\s+ya/g,    "4"],
@@ -142,19 +152,38 @@ function parseVoiceInput(raw) {
   let s = raw.toLowerCase().trim();
   // Fras-ersättningar (multi-ord) före ordmatchning
   PHRASE_MAP.forEach(([re, digit]) => { s = s.replace(re, digit); });
-  DECIMAL_WORDS.forEach(w => { s = s.replace(new RegExp("\\b" + w + "\\b", "g"), "."); });
-  Object.entries(SWEDISH_NUMS).forEach(([word, digit]) => {
-    s = s.replace(new RegExp("\\b" + word + "\\b", "g"), digit);
+
+  // Sammansatta tiotal först. "trettiofem" är ett enda ord, och slår man isär
+  // orden innan skulle ordmatchningen bara hitta "trettio" och tappa femman.
+  Object.entries(TIOTAL).forEach(([t, tv]) => {
+    if (tv < 20) return;
+    Object.entries(ENTAL).forEach(([e, ev]) => {
+      s = s.replace(new RegExp("\\b" + t + e + "\\b", "g"), " " + (tv + ev) + " ");
+    });
   });
-  s = s.replace(/[,\/]/g, ".");
-  s = s.replace(/(\d)\s*\.\s*(\d)/g, "$1.$2");
-  s = s.replace(/(\d)\s+(\d)/g, "$1.$2");
-  const clean = s.replace(/[^\d.]/g, "");
-  const match = clean.match(/\d+\.?\d*/);
-  if (!match) return null;
-  const num = parseFloat(match[0]);
-  if (isNaN(num) || num < 0 || num > 9.9) return null;
-  return String(Math.round(num * 10) / 10);
+  Object.entries(TIOTAL).forEach(([w, n]) => {
+    s = s.replace(new RegExp("\\b" + w + "\\b", "g"), " " + n + " ");
+  });
+  Object.entries(SWEDISH_NUMS).forEach(([word, digit]) => {
+    s = s.replace(new RegExp("\\b" + word + "\\b", "g"), " " + digit + " ");
+  });
+
+  const tal = (s.match(/\d+/g) || []).map(Number);
+  if (!tal.length) return null;
+
+  let v;
+  if (tal.length === 1) {
+    v = tal[0];
+  } else if (tal[0] >= 20 && tal[0] % 10 === 0 && tal.slice(1).every(n => n < 10)) {
+    v = tal.reduce((a, b) => a + b, 0);          // "trettio fem" = 35
+  } else if (tal.every(n => n < 10)) {
+    v = Number(tal.join(""));                     // "tre fem" = 35, siffra för siffra
+  } else {
+    v = tal[0];
+  }
+
+  if (isNaN(v) || v < 0 || v > 150) return null;
+  return String(Math.round(v));
 }
 
 // ── Whisper offline (lazy-loaded fallback) ───────────────────────────────────
@@ -224,15 +253,21 @@ function speakSwedish(text) {
   window.speechSynthesis.speak(u);
 }
 
+// "35" → "trettiofem". Måste klara tvåsiffriga tal sedan enheten blev
+// millimeter; tidigare räckte ental plus decimal.
 function valueToSwedish(val) {
-  // Convert "3.5" → "tre komma fem"
-  const nums = ["noll","ett","två","tre","fyra","fem","sex","sju","åtta","nio"];
-  const parts = String(val).split(".");
-  const hel = parseInt(parts[0]);
-  const dec = parts[1] ? parseInt(parts[1]) : null;
-  let s = nums[hel] !== undefined ? nums[hel] : val;
-  if (dec !== null) s += " komma " + (nums[dec] !== undefined ? nums[dec] : dec);
-  return s;
+  const n = Math.round(parseFloat(val));
+  if (isNaN(n)) return String(val);
+  const ental  = ["noll","ett","två","tre","fyra","fem","sex","sju","åtta","nio"];
+  const tontal = { 10:"tio", 11:"elva", 12:"tolv", 13:"tretton", 14:"fjorton",
+                   15:"femton", 16:"sexton", 17:"sjutton", 18:"arton", 19:"nitton" };
+  const jamna  = { 2:"tjugo", 3:"trettio", 4:"fyrtio", 5:"femtio",
+                   6:"sextio", 7:"sjuttio", 8:"åttio", 9:"nittio" };
+  if (n < 10)  return ental[n];
+  if (n < 20)  return tontal[n];
+  if (n < 100) { const t = Math.floor(n / 10), e = n % 10; return jamna[t] + (e ? ental[e] : ""); }
+  const rest = n % 100;
+  return "hundra" + (rest ? " " + valueToSwedish(rest) : "");
 }
 
 function pointToSwedish(pointId) {
@@ -508,8 +543,11 @@ function SerialButton({ onResult, selectedPoint }) {
             for (const line of lines) {
               if (!line.trim()) continue;
               const num = parseFloat(line.replace(/[^\d.]/g, ""));
+              // Gränsen 0–15 och en decimal är mätarens centimetervärde, precis
+              // som förut. Multiplikationen sker här och bara här, så inget
+              // antagande om mätarens protokoll behöver ändras.
               if (!isNaN(num) && num > 0 && num < 15) {
-                const val = String(Math.round(num * 10) / 10);
+                const val = String(Math.round(num * 10));
                 setLastValue(val);
                 onResult(val);
               }
@@ -567,7 +605,7 @@ function SerialButton({ onResult, selectedPoint }) {
       {lastValue && connected && (
         <div style={{ fontSize: "11px", color: "#475569", textAlign: "center", marginTop: "4px",
           background: "#e8f0fb", borderRadius: "4px", padding: "3px 8px", fontFamily: "'DM Mono',monospace" }}>
-          Mätte: <span style={{ color: "#0f172a" }}>{lastValue} cm</span>
+          Mätte: <span style={{ color: "#0f172a" }}>{lastValue} mm</span>
         </div>
       )}
     </div>
@@ -633,12 +671,12 @@ function deltaToRGB(v) {
 
 function getDeltaColor(delta) {
   if (delta === null || isNaN(delta)) return "#d1d5db";
-  if (delta <= -1.5) return "#dc2626";
-  if (delta <= -0.5) return "#ef4444";
-  if (delta <  -0.1) return "#fca5a5";
-  if (delta <   0.1) return "#d1d5db";
-  if (delta <   0.5) return "#93c5fd";
-  if (delta <   1.5) return "#3b82f6";
+  if (delta <= -15) return "#dc2626";
+  if (delta <=  -5) return "#ef4444";
+  if (delta <   -1) return "#fca5a5";
+  if (delta <    1) return "#d1d5db";
+  if (delta <    5) return "#93c5fd";
+  if (delta <   15) return "#3b82f6";
   return "#1d4ed8";
 }
 
@@ -775,15 +813,15 @@ function RinkMap({ dayData, onSelect, selectedPoint, deltas, width = "65%" }) {
 
 function Legend() {
   const items = [
-    { color: "#ef4444", label: "< 2.0" }, { color: "#f97316", label: "2.0–2.5" },
-    { color: "#facc15", label: "2.5–3.0" }, { color: "#4ade80", label: "3.0–4.0" },
-    { color: "#0284c7", label: "≥ 4.0" },
+    { color: "#ef4444", label: "< 20" }, { color: "#f97316", label: "20–25" },
+    { color: "#facc15", label: "25–30" }, { color: "#4ade80", label: "30–40" },
+    { color: "#0284c7", label: "≥ 40" },
   ];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "10px", justifyContent: "center" }}>
       {items.map(i => (
         <div key={i.label} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "#1d4ed8" }}>
-          <div style={{ width: 9, height: 9, borderRadius: "2px", background: i.color }} />{i.label} cm
+          <div style={{ width: 9, height: 9, borderRadius: "2px", background: i.color }} />{i.label} mm
         </div>
       ))}
     </div>
@@ -792,15 +830,15 @@ function Legend() {
 
 function DeltaLegend() {
   const items = [
-    { color: "#dc2626", label: "< −1.5" }, { color: "#fca5a5", label: "−1.5–0" },
+    { color: "#dc2626", label: "< −15" }, { color: "#fca5a5", label: "−15–0" },
     { color: "#d1d5db", label: "±0" },
-    { color: "#93c5fd", label: "0–1.5" }, { color: "#1d4ed8", label: "> 1.5" },
+    { color: "#93c5fd", label: "0–15" }, { color: "#1d4ed8", label: "> 15" },
   ];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "10px", justifyContent: "center" }}>
       {items.map(i => (
         <div key={i.label} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "#475569" }}>
-          <div style={{ width: 9, height: 9, borderRadius: "2px", background: i.color }} />{i.label} cm
+          <div style={{ width: 9, height: 9, borderRadius: "2px", background: i.color }} />{i.label} mm
         </div>
       ))}
     </div>
@@ -875,9 +913,9 @@ function DeltaPanel({ deltas, fromLabel, toLabel }) {
         {fromLabel} <span style={{ color: "#94a3b8" }}>→</span> {toLabel}
       </div>
       <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
-        <Stat label="Snittförändring" value={(avg > 0 ? "+" : "") + avg.toFixed(2)} unit="cm" color={avgColor} />
-        <Stat label="Mest bygge" value={"+" + maxBuild.toFixed(1)} unit={maxBuildPt?.label || ""} color="#1d4ed8" />
-        <Stat label="Mest hyvling" value={maxRemove.toFixed(1)} unit={maxRemovePt?.label || ""} color="#dc2626" />
+        <Stat label="Snittförändring" value={(avg > 0 ? "+" : "") + avg.toFixed(1)} unit="mm" color={avgColor} />
+        <Stat label="Mest bygge" value={"+" + maxBuild.toFixed(0)} unit={maxBuildPt?.label || ""} color="#1d4ed8" />
+        <Stat label="Mest hyvling" value={maxRemove.toFixed(0)} unit={maxRemovePt?.label || ""} color="#dc2626" />
       </div>
       <div style={{ display: "flex", height: "8px", borderRadius: "4px", overflow: "hidden", marginBottom: "6px" }}>
         <div style={{ flex: removed || 0.01, background: "#ef4444" }} />
@@ -923,12 +961,12 @@ function PointInput({ point, value, selected, onChange, onFocus }) {
       borderRadius: "6px", padding: "5px 7px", transition: "border-color 0.15s"
     }}>
       <div style={{ fontSize: "9px", color: "#475569", marginBottom: "2px", fontFamily: "'DM Mono',monospace" }}>{point.label.replace(/^[IS]/, "")}</div>
-      <input type="number" step="0.1" min="0" max="10" value={value}
+      <input type="number" step="1" min="0" max="150" value={value}
         onChange={e => onChange(e.target.value)} onFocus={onFocus} placeholder="–"
         style={{ width: "100%", background: "transparent", border: "none", outline: "none",
           color: value ? getColor(value) : "#94a3b8", fontSize: "15px", fontWeight: "700",
           fontFamily: "'DM Mono',monospace", padding: 0 }} />
-      <div style={{ fontSize: "8px", color: "#94a3b8" }}>cm</div>
+      <div style={{ fontSize: "8px", color: "#94a3b8" }}>mm</div>
     </div>
   );
 }
@@ -1193,13 +1231,13 @@ function SlabInput({ point, value, isRef, onChange, onSetRef }) {
       {isRef ? (
         <div style={{ fontSize: "15px", fontWeight: "700", color: "#0284c7", fontFamily: "'DM Mono',monospace" }}>0</div>
       ) : (
-        <input type="number" step="0.1" max="0" value={value}
+        <input type="number" step="1" max="0" value={value}
           onChange={e => onChange(e.target.value)} placeholder="–"
           style={{ width: "100%", background: "transparent", border: "none", outline: "none",
             color: value !== "" ? "#0f172a" : "#94a3b8", fontSize: "15px", fontWeight: "700",
             fontFamily: "'DM Mono',monospace", padding: 0 }} />
       )}
-      <div style={{ fontSize: "8px", color: "#94a3b8" }}>cm</div>
+      <div style={{ fontSize: "8px", color: "#94a3b8" }}>mm</div>
     </div>
   );
 }
@@ -1218,7 +1256,7 @@ function CalibrationView({ slab, refId, onChange }) {
     <div style={{ maxWidth: "640px", margin: "0 auto", padding: "16px" }}>
       <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "12px", padding: "14px", marginBottom: "12px", fontSize: "13px", color: "#1e293b", lineHeight: 1.5 }}>
         <b>Kalibrering av betongplattan</b><br />
-        Ange lasermätt höjd per borrpunkt i cm, relativt den högsta punkten (referens = 0).
+        Ange lasermätt höjd per borrpunkt i mm, relativt den högsta punkten (referens = 0).
         Eftersom referensen är högst blir övriga värden <b>negativa</b> — plattan ligger lägre där.
         Andra rinken visar sedan <b>isytans höjd</b> per punkt = istjocklek + plattans offset, byggd från betongplattan.
         En jämn isyta betyder att alla värden hamnar lika. Tryck på <b>ref</b> på den högsta punkten så låses den till 0.
@@ -1227,8 +1265,8 @@ function CalibrationView({ slab, refId, onChange }) {
       {refId && (
         <div style={{ background: "#ffffff", border: "1px solid #d1ddf0", borderRadius: "12px", padding: "14px", marginBottom: "12px", display: "flex", gap: "8px" }}>
           <Stat label="Referenspunkt" value={refId} unit="" color="#0284c7" />
-          <Stat label="Lägsta platta" value={lowest != null ? lowest.toFixed(1) : "–"} unit="cm" color="#dc2626" />
-          <Stat label="Höjdskillnad" value={spread != null ? spread.toFixed(1) : "–"} unit="cm" color="#1d4ed8" />
+          <Stat label="Lägsta platta" value={lowest != null ? lowest.toFixed(0) : "–"} unit="mm" color="#dc2626" />
+          <Stat label="Höjdskillnad" value={spread != null ? spread.toFixed(0) : "–"} unit="mm" color="#1d4ed8" />
         </div>
       )}
 
@@ -1309,7 +1347,7 @@ async function gFetch(path, opts = {}) {
 let siteIdPromise = null;
 const getSiteId = () => (siteIdPromise ||= gFetch(`/sites/${SP_HOST}:${SP_SITE_PATH}`).then(s => s.id));
 
-const TOMT_DOK = () => ({ rev: "", updatedAt: 0, data: { hallar: {} } });
+const TOMT_DOK = () => ({ rev: "", updatedAt: 0, data: { version: DATA_VERSION, hallar: {} } });
 
 async function syncGet() {
   const siteId = await getSiteId();
@@ -1400,17 +1438,50 @@ const hallData = (d, h) => (d && d.hallar && d.hallar[h]) || tomHall();
 // skickat en onödig skrivning.
 const sorteraHallar = h => Object.fromEntries(Object.keys(h).sort().map(k => [k, h[k]]));
 
+// Version 1 = centimeter, version 2 = millimeter. Enheten byttes 2026-08-19 så
+// operatören slipper leta efter kommatecknet med vantar på. Data utan version
+// är per definition version 1 — den nyckeln fanns inte då.
+const DATA_VERSION = 2;
+
+const cmTillMm = v => {
+  const n = parseFloat(v);
+  return (v === "" || v == null || isNaN(n)) ? "" : String(Math.round(n * 10));
+};
+
+function hallTillMm(h) {
+  const sl = h.slab || emptySlab();
+  const offsets = {};
+  ALL_POINTS.forEach(p => { offsets[p.id] = cmTillMm(sl.offsets && sl.offsets[p.id]); });
+  return {
+    weeks: (h.weeks || []).map(w => {
+      const ny = { weekNum: w.weekNum, year: w.year };
+      DAY_KEYS.forEach(k => {
+        const d = w[k] || emptyDayData();
+        const values = {};
+        ALL_POINTS.forEach(p => { values[p.id] = cmTillMm(d.values && d.values[p.id]); });
+        ny[k] = { values, note: d.note || "" };
+      });
+      return ny;
+    }),
+    slab: { ...sl, offsets },
+  };
+}
+
 // Datat var platt ({weeks, slab}) när appen bara kände en ishall. Gammal data
 // lyfts in under Nacka ishall — det är den hall alla befintliga mätningar
-// kommer från. Körs på både lokalt och hämtat data, så migreringen sker en gång
-// av sig själv oavsett vilken väg datat kommer in.
+// kommer från. Körs på både lokalt och hämtat data, så både hall- och
+// enhetsmigreringen sker av sig själv oavsett vilken väg datat kommer in.
 function normalisera(d) {
-  if (!d) return { hallar: {} };
-  if (d.hallar) return { hallar: sorteraHallar(d.hallar) };
-  if (d.weeks || d.slab) {
-    return { hallar: { [STANDARDHALL]: { weeks: d.weeks || [], slab: d.slab || emptySlab() } } };
+  if (!d) return { version: DATA_VERSION, hallar: {} };
+  let hallar;
+  if (d.hallar) hallar = { ...d.hallar };
+  else if (d.weeks || d.slab) hallar = { [STANDARDHALL]: { weeks: d.weeks || [], slab: d.slab || emptySlab() } };
+  else hallar = {};
+
+  if ((d.version || 1) < 2) {
+    Object.keys(hallar).forEach(h => { hallar[h] = hallTillMm(hallar[h]); });
   }
-  return { hallar: {} };
+  return { version: DATA_VERSION, hallar: sorteraHallar(hallar) };
 }
 
 function mergeData(local, remote, preferRemote) {
@@ -1423,7 +1494,7 @@ function mergeData(local, remote, preferRemote) {
       slab:  mergeSlab(a.slab, b.slab, preferRemote),
     };
   });
-  return { hallar };
+  return { version: DATA_VERSION, hallar };
 }
 
 function SyncBadge({ sync }) {
@@ -1458,7 +1529,7 @@ function App() {
       const w = JSON.parse(localStorage.getItem("borrmall_weeks") || "[]");
       const sl = JSON.parse(localStorage.getItem("borrmall_slab") || "null");
       return normalisera({ weeks: w, slab: sl && sl.offsets ? sl : emptySlab() });
-    } catch { return { hallar: {} }; }
+    } catch { return { version: DATA_VERSION, hallar: {} }; }
   });
   const [hall, setHall] = useState(() => {
     try { return localStorage.getItem("borrmall_hall") || STANDARDHALL; } catch { return STANDARDHALL; }
@@ -1473,7 +1544,7 @@ function App() {
     const h = hallRef.current;
     const nuvarande = hallData(d, h);
     const nytt = typeof upd === "function" ? upd(nuvarande[falt]) : upd;
-    return { hallar: sorteraHallar({ ...d.hallar, [h]: { ...nuvarande, [falt]: nytt } }) };
+    return { version: DATA_VERSION, hallar: sorteraHallar({ ...d.hallar, [h]: { ...nuvarande, [falt]: nytt } }) };
   }), []);
   const setWeeks = useCallback(upd => setIHall("weeks", upd), [setIHall]);
   const setSlab  = useCallback(upd => setIHall("slab",  upd), [setIHall]);
@@ -1776,7 +1847,7 @@ function App() {
           {compareMode && deltas && <DeltaPanel deltas={deltas} fromLabel={compareFromLabel} toLabel={compareToLabel} />}
 
           <div style={{ background: "#ffffff", borderRadius: "12px", border: "1px solid #d1ddf0", padding: "16px", marginTop: "16px" }}>
-            <div style={{ fontSize: "12px", color: "#0f172a", fontWeight: "700", marginBottom: "12px" }}>Ange mätvärden (cm)</div>
+            <div style={{ fontSize: "12px", color: "#0f172a", fontWeight: "700", marginBottom: "12px" }}>Ange mätvärden (mm)</div>
             {dayData && (
               <InputGrid
                 dayData={dayData}
@@ -1815,11 +1886,11 @@ function App() {
                   {DAY_KEYS.map((key, i) => {
                     const d = week[key];
                     const vs = Object.values(d.values).filter(v => v !== "").map(Number);
-                    const avg = vs.length ? (vs.reduce((a, b) => a + b, 0) / vs.length).toFixed(1) : null;
+                    const avg = vs.length ? (vs.reduce((a, b) => a + b, 0) / vs.length).toFixed(0) : null;
                     return (
                       <div key={key} style={{ background: "#e8f0fb", borderRadius: "6px", padding: "6px 10px", minWidth: "60px", border: `1px solid ${avg ? getColor(avg) + "66" : "#d1ddf0"}` }}>
                         <div style={{ fontSize: "9px", color: "#475569", marginBottom: "2px" }}>{DAYS[i]}</div>
-                        <div style={{ fontSize: "14px", fontWeight: "700", color: avg ? getColor(avg) : "#bfdbfe", fontFamily: "'DM Mono',monospace" }}>{avg ? avg + " cm" : "–"}</div>
+                        <div style={{ fontSize: "14px", fontWeight: "700", color: avg ? getColor(avg) : "#bfdbfe", fontFamily: "'DM Mono',monospace" }}>{avg ? avg + " mm" : "–"}</div>
                         <div style={{ fontSize: "8px", color: "#94a3b8" }}>{vs.length} pt</div>
                       </div>
                     );
