@@ -4,8 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Sportrond">
 <meta name="theme-color" content="#1D9E75">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png" type="image/png">
 <title>Sportrond</title>
 <style>
 :root {
@@ -1190,6 +1195,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
   await initApp();
+
+  // Service workern cachar ingenting; den finns för att Android ska
+  // erbjuda "Installera app". Misslyckas registreringen fungerar appen
+  // precis som förut, så felet får inte stoppa något.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW:', e));
+  }
 });
 </script>
 </body>
