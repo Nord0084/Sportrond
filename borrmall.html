@@ -1309,7 +1309,7 @@ async function gFetch(path, opts = {}) {
 let siteIdPromise = null;
 const getSiteId = () => (siteIdPromise ||= gFetch(`/sites/${SP_HOST}:${SP_SITE_PATH}`).then(s => s.id));
 
-const TOMT_DOK = () => ({ rev: "", updatedAt: 0, data: { weeks: [], slab: emptySlab() } });
+const TOMT_DOK = () => ({ rev: "", updatedAt: 0, data: { hallar: {} } });
 
 async function syncGet() {
   const siteId = await getSiteId();
@@ -1384,12 +1384,46 @@ function mergeSlab(a, b, preferB) {
   ALL_POINTS.forEach(p => { offsets[p.id] = mergeVal(a.offsets?.[p.id], b.offsets?.[p.id], preferB); });
   return { offsets, ref: mergeVal(a.ref, b.ref, preferB) };
 }
+// ── Anläggningar ──────────────────────────────────────────────────────────────
+// Håll listan i takt med ANLAGGNINGAR_IS i index.html. Den dubbleras med flit:
+// filerna delar inget bygge, och en delad modul hade krävt ett byggsteg som den
+// här appen medvetet inte har.
+const HALLAR = ["Nacka ishall", "Älta ishall", "Björknäs ishall", "Saltsjöbadens ishall"];
+const STANDARDHALL = "Nacka ishall";
+
+const tomHall  = () => ({ weeks: [], slab: emptySlab() });
+const hallData = (d, h) => (d && d.hallar && d.hallar[h]) || tomHall();
+
+// Nycklarna sorteras alltid, så att JSON-strängen av samma data blir identisk
+// oavsett i vilken ordning hallarna råkade dyka upp. Annars hade appen trott att
+// datat ändrats varje gång serverns och den lokala ordningen skilde sig, och
+// skickat en onödig skrivning.
+const sorteraHallar = h => Object.fromEntries(Object.keys(h).sort().map(k => [k, h[k]]));
+
+// Datat var platt ({weeks, slab}) när appen bara kände en ishall. Gammal data
+// lyfts in under Nacka ishall — det är den hall alla befintliga mätningar
+// kommer från. Körs på både lokalt och hämtat data, så migreringen sker en gång
+// av sig själv oavsett vilken väg datat kommer in.
+function normalisera(d) {
+  if (!d) return { hallar: {} };
+  if (d.hallar) return { hallar: sorteraHallar(d.hallar) };
+  if (d.weeks || d.slab) {
+    return { hallar: { [STANDARDHALL]: { weeks: d.weeks || [], slab: d.slab || emptySlab() } } };
+  }
+  return { hallar: {} };
+}
+
 function mergeData(local, remote, preferRemote) {
-  const r = remote || {};
-  return {
-    weeks: mergeWeeks(local.weeks, r.weeks || [], preferRemote),
-    slab:  mergeSlab(local.slab, r.slab, preferRemote),
-  };
+  const l = normalisera(local), r = normalisera(remote);
+  const hallar = {};
+  [...new Set([...Object.keys(l.hallar), ...Object.keys(r.hallar)])].sort().forEach(h => {
+    const a = l.hallar[h] || tomHall(), b = r.hallar[h] || tomHall();
+    hallar[h] = {
+      weeks: mergeWeeks(a.weeks, b.weeks, preferRemote),
+      slab:  mergeSlab(a.slab, b.slab, preferRemote),
+    };
+  });
+  return { hallar };
 }
 
 function SyncBadge({ sync }) {
@@ -1413,15 +1447,36 @@ function SyncBadge({ sync }) {
 }
 
 function App() {
-  const [weeks, setWeeks] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("borrmall_weeks") || "[]"); } catch { return []; }
-  });
-  const [slab, setSlab] = useState(() => {
+  // All data för alla hallar i ett objekt. weeks och slab härleds ur vald hall,
+  // så de fem anropsställena för setWeeks/setSlab kunde lämnas orörda.
+  const [data, setData] = useState(() => {
     try {
-      const s = JSON.parse(localStorage.getItem("borrmall_slab"));
-      return s && s.offsets ? s : emptySlab();
-    } catch { return emptySlab(); }
+      const nytt = localStorage.getItem("borrmall_data");
+      if (nytt) return normalisera(JSON.parse(nytt));
+      // Migrering från de gamla, platta nycklarna. De skrivs aldrig igen, men
+      // lämnas kvar orörda som säkerhetskopia.
+      const w = JSON.parse(localStorage.getItem("borrmall_weeks") || "[]");
+      const sl = JSON.parse(localStorage.getItem("borrmall_slab") || "null");
+      return normalisera({ weeks: w, slab: sl && sl.offsets ? sl : emptySlab() });
+    } catch { return { hallar: {} }; }
   });
+  const [hall, setHall] = useState(() => {
+    try { return localStorage.getItem("borrmall_hall") || STANDARDHALL; } catch { return STANDARDHALL; }
+  });
+
+  const weeks = hallData(data, hall).weeks;
+  const slab  = hallData(data, hall).slab;
+
+  // Skriver tillbaka in i rätt hall. Tar både värde och uppdateringsfunktion,
+  // precis som en vanlig setState, så anropsställena inte behövde ändras.
+  const setIHall = useCallback((falt, upd) => setData(d => {
+    const h = hallRef.current;
+    const nuvarande = hallData(d, h);
+    const nytt = typeof upd === "function" ? upd(nuvarande[falt]) : upd;
+    return { hallar: sorteraHallar({ ...d.hallar, [h]: { ...nuvarande, [falt]: nytt } }) };
+  }), []);
+  const setWeeks = useCallback(upd => setIHall("weeks", upd), [setIHall]);
+  const setSlab  = useCallback(upd => setIHall("slab",  upd), [setIHall]);
   const [currentWeekIdx, setCurrentWeekIdx] = useState(null);
   const [activeDay, setActiveDay] = useState("mon");
   const [selectedPoint, setSelectedPoint] = useState(null);
@@ -1432,8 +1487,8 @@ function App() {
   const touchStartX = useRef(null);
   const [sync, setSync] = useState({ status: "connecting", at: null });
   // Refs så synk-callbacks kan läsa senaste state utan att bytas ut varje render.
-  const weeksRef = useRef(weeks);        weeksRef.current = weeks;
-  const slabDataRef = useRef(slab);      slabDataRef.current = slab;
+  const dataRef = useRef(data);          dataRef.current = data;
+  const hallRef = useRef(hall);          hallRef.current = hall;
   const curIdxRef = useRef(currentWeekIdx);   curIdxRef.current = currentWeekIdx;
   const cmpFromRef = useRef(null);            cmpFromRef.current = compareFrom;
   const cmpToRef = useRef(null);              cmpToRef.current = compareTo;
@@ -1455,27 +1510,29 @@ function App() {
   };
 
   useEffect(() => {
-    try { localStorage.setItem("borrmall_weeks", JSON.stringify(weeks)); } catch {}
-  }, [weeks]);
+    try { localStorage.setItem("borrmall_data", JSON.stringify(data)); } catch {}
+  }, [data]);
 
   useEffect(() => {
-    try { localStorage.setItem("borrmall_slab", JSON.stringify(slab)); } catch {}
-  }, [slab]);
+    try { localStorage.setItem("borrmall_hall", hall); } catch {}
+  }, [hall]);
 
   // Tillämpa ett serverdokument: merga in i lokal data och remappa index. Stabil ([]).
   const applyRemote = useCallback((doc, preferRemote) => {
-    const oldWeeks = weeksRef.current;
-    const local = { weeks: oldWeeks, slab: slabDataRef.current };
-    const merged = mergeData(local, doc.data, preferRemote);
+    const h        = hallRef.current;
+    const oldWeeks = hallData(dataRef.current, h).weeks;
+    const merged   = mergeData(dataRef.current, doc.data, preferRemote);
+    const nyaWeeks = hallData(merged, h).weeks;
     const idOf = i => (i != null && oldWeeks[i]) ? oldWeeks[i] : null;
-    const findIdx = w => w ? merged.weeks.findIndex(x => x.weekNum === w.weekNum && x.year === w.year) : -1;
+    const findIdx = w => w ? nyaWeeks.findIndex(x => x.weekNum === w.weekNum && x.year === w.year) : -1;
 
     revRef.current = doc.rev || 0;
     appliedRef.current = doc.updatedAt || 0;
-    lastPushedRef.current = JSON.stringify({ weeks: (doc.data?.weeks) || [], slab: (doc.data?.slab) || emptySlab() });
+    // Serverns baslinje, inte det mergade. Skiljer de sig har vi något eget att
+    // skicka, och push-effekten upptäcker det på nästa render.
+    lastPushedRef.current = JSON.stringify(normalisera(doc.data));
 
-    setWeeks(merged.weeks);
-    setSlab(merged.slab);
+    setData(merged);
     // Behåll aktuell vecka / jämförelseval trots ev. omsortering.
     const ci = findIdx(idOf(curIdxRef.current)); if (ci >= 0) setCurrentWeekIdx(ci);
     const remap = (ref, setter) => {
@@ -1524,7 +1581,7 @@ function App() {
   }, [applyRemote]);
 
   // Skicka lokala ändringar (debouncad) när de avviker från serverns baslinje.
-  const dataJson = useMemo(() => JSON.stringify({ weeks, slab }), [weeks, slab]);
+  const dataJson = useMemo(() => JSON.stringify(data), [data]);
   useEffect(() => {
     if (!SYNC_ENABLED) return;
     if (dataJson === lastPushedRef.current) return;
@@ -1542,7 +1599,11 @@ function App() {
       const newWeek = { ...emptyWeek(), weekNum, year };
       setWeeks(prev => { const u = [...prev, newWeek]; setCurrentWeekIdx(u.length - 1); return u; });
     }
-  }, []);
+    // Jämförelseval pekar på veckoindex i den hall de valdes i och betyder inget
+    // i en annan. Nollställs hellre än att peka på fel mätning.
+    setCompareFrom(null);
+    setCompareTo(null);
+  }, [hall]);
 
   const currentWeek = currentWeekIdx !== null ? weeks[currentWeekIdx] : null;
   const updateDayData = (key, data) => setWeeks(prev => prev.map((w, i) => i === currentWeekIdx ? { ...w, [key]: data } : w));
@@ -1605,6 +1666,12 @@ function App() {
             Borrmall
             {currentWeek && <WeekNav currentWeek={currentWeek} onNavigate={navigateToWeek} />}
           </div>
+          <select value={hall} onChange={e => setHall(e.target.value)}
+            style={{ marginTop: "4px", fontSize: "13px", fontWeight: 600, color: "#0f172a",
+              border: "1px solid #d1ddf0", borderRadius: "6px", padding: "4px 6px",
+              background: "#f8fafc", maxWidth: "210px" }}>
+            {HALLAR.map(h => <option key={h} value={h}>{h}</option>)}
+          </select>
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end" }}>
           <TabBtn active={view === "input"}   onClick={() => setView("input")}>Mätning</TabBtn>
