@@ -323,11 +323,14 @@ async function gFetch(path, opts = {}) {
   const url   = path.startsWith('http') ? path : GRAPH + path;
   const res   = await fetch(url, {
     ...opts,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    // opts.headers sist: annars gick if-match aldrig fram, det skrevs över här.
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(opts.headers || {}) }
   });
   if (!res.ok) {
     const err = await res.text().catch(() => res.status);
-    throw new Error(`Graph ${res.status}: ${err}`);
+    const fel = new Error(`Graph ${res.status}: ${err}`);
+    fel.status = res.status;   // så anropare kan skilja en krock (412) från övriga fel
+    throw fel;
   }
   if (res.status === 204) return null;
   return res.json();
@@ -345,6 +348,24 @@ async function gGetAll(path) {
     url = data['@odata.nextLink'] || null;
   }
   return items;
+}
+
+// ============================================================
+// Krockskydd
+// ============================================================
+// Appen laddar allt vid start och skrev tidigare blint. Redigerade två
+// telefoner samma post vann den som sparade sist, tyst. Nu skickas postens
+// etag som if-match, och SharePoint svarar 412 om någon hunnit före.
+const ifMatch   = etag => etag ? { 'if-match': etag } : {};
+const ärKrock   = e => !!e && e.status === 412;
+const KROCKTEXT = 'Någon annan har ändrat den här posten sedan appen laddades. Ladda om appen för att se den senaste versionen, och gör sedan om ändringen.';
+
+// Etagen ändras vid varje skrivning. Uppdateras den inte skulle nästa
+// ändring i samma session se ut som en krock trots att inget hänt. Saknas
+// etag i svaret nollas den hellre än behålls stale — då går nästa skrivning
+// utan skydd, vilket är bättre än att låsa användaren ute från sin egen post.
+function nyEtag(objekt, svar) {
+  objekt.etag = (svar && svar['@odata.etag']) || null;
 }
 
 // ============================================================
@@ -405,6 +426,7 @@ async function loadLogs() {
     if (!avvMap[rid]) avvMap[rid] = [];
     avvMap[rid].push({
       spId:     item.id,
+      etag:     item['@odata.etag'] || null,
       kategori: f[COL_A.kategori]      || '',
       punkt:    f.Title                 || '',
       hint:     f[COL_A.hint]           || '',
@@ -419,6 +441,7 @@ async function loadLogs() {
     return {
       spId:       item.id,
       id:         parseInt(item.id),
+      etag:       item['@odata.etag'] || null,
       created:    item.createdDateTime || '',
       typ:        f[COL_R.typ]      || 'sporthall',
       anlaggning: f.Title           || '',
@@ -476,26 +499,32 @@ async function saveRondering(r) {
 // omöjliga att hitta tillbaka till.
 async function deleteRondering(l) {
   for (const a of l.avvikelser) {
-    if (a.spId) await gFetch(`/sites/${siteId}/lists/${aListId}/items/${a.spId}`, { method: 'DELETE' });
+    if (a.spId) await gFetch(`/sites/${siteId}/lists/${aListId}/items/${a.spId}`,
+                             { method: 'DELETE', headers: ifMatch(a.etag) });
   }
-  await gFetch(`/sites/${siteId}/lists/${rListId}/items/${l.id}`, { method: 'DELETE' });
+  await gFetch(`/sites/${siteId}/lists/${rListId}/items/${l.id}`,
+               { method: 'DELETE', headers: ifMatch(l.etag) });
 }
 
 async function updateAvvikelseText(avv) {
-  await gFetch(`/sites/${siteId}/lists/${aListId}/items/${avv.spId}`, {
+  const svar = await gFetch(`/sites/${siteId}/lists/${aListId}/items/${avv.spId}`, {
     method: 'PATCH',
+    headers: ifMatch(avv.etag),
     body: JSON.stringify({ fields: { [COL_A.anteckning]: avv.text } })
   });
+  nyEtag(avv, svar);
 }
 
 async function updateAvvikelse(avv) {
-  await gFetch(`/sites/${siteId}/lists/${aListId}/items/${avv.spId}`, {
+  const svar = await gFetch(`/sites/${siteId}/lists/${aListId}/items/${avv.spId}`, {
     method: 'PATCH',
+    headers: ifMatch(avv.etag),
     body: JSON.stringify({ fields: {
       [COL_A.atgardad]:      avv.atgardad,
       [COL_A.atgardadDatum]: avv.atgardad ? spDatum(new Date()) : null
     }})
   });
+  nyEtag(avv, svar);
 }
 
 // ============================================================
@@ -907,7 +936,7 @@ async function sparaAvvText() {
     // text som aldrig skrevs.
     a.text = gammal;
     hideLoading();
-    alert('Kunde inte spara texten: ' + e.message);
+    alert(ärKrock(e) ? KROCKTEXT : 'Kunde inte spara texten: ' + e.message);
     console.error(e);
   }
   renderAvvikelser();
@@ -931,7 +960,9 @@ async function taBortRondering(i) {
     renderAvvikelser();
   } catch (e) {
     hideLoading();
-    alert('Kunde inte ta bort: ' + e.message);
+    alert(ärKrock(e)
+      ? 'Någon annan har ändrat ronderingen eller en av dess avvikelser sedan appen laddades. Ladda om appen och försök igen — delar av ronderingen kan redan vara borttagna.'
+      : 'Kunde inte ta bort: ' + e.message);
     console.error(e);
   }
 }
@@ -1054,7 +1085,7 @@ async function toggleAtgardad(li, ai) {
     renderAvvikelser();
   } catch (e) {
     hideLoading();
-    alert('Fel vid uppdatering: ' + e.message);
+    alert(ärKrock(e) ? KROCKTEXT : 'Fel vid uppdatering: ' + e.message);
     a.atgardad = wasAtg;
     a.atgDatum = wasDatum;
     renderAvvikelser();
