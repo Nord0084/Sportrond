@@ -279,27 +279,39 @@ async function getToken() {
   try {
     return (await msalInstance.acquireTokenSilent({ scopes: SCOPES, account })).accessToken;
   } catch {
-    return (await msalInstance.acquireTokenPopup({ scopes: SCOPES })).accessToken;
+    // Räcker inte tystnaden till navigerar vi bort till Entra. Anropet
+    // returnerar direkt, men sidan är på väg att lämnas — därför ett löfte
+    // som aldrig löses, så ingen anropare hinner tro att den fick en token.
+    await msalInstance.acquireTokenRedirect({ scopes: SCOPES, account });
+    return new Promise(() => {});
   }
 }
 
+// Visa felkoden direkt på skärmen — annars syns AADSTS-koden bara i
+// konsolen, vilket ingen har uppe på en telefon ute i en hall.
+function visaLoginfel(e) {
+  const kod = e && e.errorCode ? ` (${e.errorCode})` : '';
+  document.getElementById('login-error').textContent = `Inloggning misslyckades${kod}. Försök igen.`;
+  console.error(e);
+}
+
+// Redirect, inte popup. Popupen laddar samma sida, och appens egen
+// handleRedirectPromise där inne hann konsumera svaret innan öppnaren
+// pollat fram det — popupen blev kvar med en andra inloggningsruta, och
+// ett klick i den gav block_nested_popups. Redirect har inte det problemet
+// och slipper dessutom mobilernas popup-blockerare.
 async function login() {
   document.getElementById('login-error').textContent = '';
   if (!msalInstance) { visaLaddfel(); return; }
   try {
-    await msalInstance.loginPopup({ scopes: SCOPES });
-    await initApp();
+    await msalInstance.loginRedirect({ scopes: SCOPES });
   } catch (e) {
-    // Visa felkoden direkt på skärmen — annars syns AADSTS-koden bara i
-    // konsolen, vilket ingen har uppe på en telefon ute i en hall.
-    const kod = e.errorCode ? ` (${e.errorCode})` : '';
-    document.getElementById('login-error').textContent = `Inloggning misslyckades${kod}. Försök igen.`;
-    console.error(e);
+    visaLoginfel(e);
   }
 }
 
 function logout() {
-  msalInstance.logoutPopup();
+  msalInstance.logoutRedirect();
 }
 
 // ============================================================
@@ -1049,7 +1061,15 @@ function exportAvvikelserPDF() {
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
   if (!msalInstance) { visaLaddfel(); return; }
-  await msalInstance.handleRedirectPromise().catch(() => {});
+  try {
+    // Här landar svaret från redirect-flödet. Felet får inte sväljas —
+    // det är enda stället AADSTS-koder från inloggningen dyker upp nu.
+    const svar = await msalInstance.handleRedirectPromise();
+    if (svar && svar.account) msalInstance.setActiveAccount(svar.account);
+  } catch (e) {
+    visaLoginfel(e);
+    return;
+  }
   await initApp();
 });
 </script>
