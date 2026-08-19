@@ -231,6 +231,10 @@ textarea { width: 100%; border: 0.5px solid var(--color-border-secondary); borde
   <button class="nav-btn active" onclick="goTo('rondering',this)"><span class="nav-icon">☑️</span>Rondering</button>
   <button class="nav-btn" onclick="goTo('historik',this)"><span class="nav-icon">📋</span>Historik</button>
   <button class="nav-btn" onclick="goTo('avvikelser',this)"><span class="nav-icon">⚠️</span>Avvikelser</button>
+  <!-- Egen sida, inte en vy: Borrmall är React och skulle tvinga alla som bara
+       ska bocka av en checklista att ladda React, ReactDOM och Babel. Samma
+       flik och samma origin gör att MSAL-sessionen följer med dit. -->
+  <button class="nav-btn" onclick="location.href='borrmall.html'"><span class="nav-icon">🧊</span>Borrmall</button>
 </div>
 
 <!-- OBS: 2.38.2 är den sista v2-versionen som finns på alcdn.msauth.net.

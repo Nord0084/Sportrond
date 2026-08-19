@@ -1,0 +1,1799 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Borrmall — Istjocklek</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <!-- 2.38.2 är sista v2 på alcdn.msauth.net; nyare versioner ger 404 där. -->
+  <script src="https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js"></script>
+  <script type="module">
+    import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.0/dist/transformers.min.js";
+    env.allowLocalModels = false;
+    window._transformersPipeline = pipeline;
+    window._transformersReady = true;
+    window.dispatchEvent(new Event("transformers-ready"));
+  </script>
+  <style>
+    html, body { margin: 0; padding: 0; background: #f0f4f8; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+
+
+const DAYS = ["Måndag", "Onsdag", "Fredag", "Extra"];
+const DAY_KEYS = ["mon", "wed", "fri", "extra"];
+
+const ICE_POINTS = [
+  // Ände 1 (botten) — på mållinjen y=88
+  { id: "I1",  x: 46, y: 88, label: "I1"  }, // höger, vid mållinjen
+  { id: "I2",  x: 31, y: 88, label: "I2"  }, // mitt, vid mållinjen
+  { id: "I3",  x: 16, y: 88, label: "I3"  }, // vänster, vid mållinjen
+  // Face-off cirklar ände 1 — y=76
+  { id: "I4",  x: 18, y: 76, label: "I4"  }, // vänster face-off
+  { id: "I5",  x: 44, y: 76, label: "I5"  }, // höger face-off
+  // Mittzon — på centerlinjen y=50
+  { id: "I6",  x: 50, y: 66, label: "I6"  }, // höger, nedre blålinje
+  { id: "I7",  x: 12, y: 66, label: "I7"  }, // vänster, nedre blålinje
+  { id: "I8",  x: 24, y: 50, label: "I8"  }, // vänster om centercirkeln
+  { id: "I9",  x: 38, y: 50, label: "I9"  }, // höger om centercirkeln
+  // Vid blålinjerna — I6/I7 nedre, I10/I11 övre
+  { id: "I10", x: 50, y: 34, label: "I10" }, // höger, övre blålinje
+  { id: "I11", x: 12, y: 34, label: "I11" }, // vänster, övre blålinje
+  // Face-off cirklar ände 2 — y=24
+  { id: "I12", x: 18, y: 24, label: "I12" }, // vänster face-off
+  { id: "I13", x: 44, y: 24, label: "I13" }, // höger face-off
+  // Ände 2 (topp) — på mållinjen y=12
+  { id: "I14", x: 46, y: 12, label: "I14" }, // höger, vid mållinjen
+  { id: "I15", x: 31, y: 12, label: "I15" }, // mitt, ovanför mållinjen
+  { id: "I16", x: 16, y: 12, label: "I16" }, // vänster, vid mållinjen
+];
+
+const EDGE_POINTS = [
+  { id: "S1",  x: 31, y: 98, label: "S1"  },
+  { id: "S2",  x: 7,  y: 94, label: "S2"  },
+  { id: "S3",  x: 2,  y: 76, label: "S3"  },
+  { id: "S4",  x: 2,  y: 50, label: "S4"  },
+  { id: "S5",  x: 2,  y: 24, label: "S5"  },
+  { id: "S6",  x: 7,  y: 4,  label: "S6"  },
+  { id: "S7",  x: 31, y: 1,  label: "S7"  },
+  { id: "S8",  x: 55, y: 4,  label: "S8"  },
+  { id: "S9",  x: 60, y: 24, label: "S9"  },
+  { id: "S10", x: 60, y: 50, label: "S10" },
+  { id: "S11", x: 60, y: 76, label: "S11" },
+  { id: "S12", x: 55, y: 94, label: "S12" },
+];
+
+const ALL_POINTS = [...ICE_POINTS, ...EDGE_POINTS];
+
+const emptyDayData = () => {
+  const vals = {};
+  ALL_POINTS.forEach(p => (vals[p.id] = ""));
+  return { values: vals, note: "" };
+};
+
+const emptyWeek = () => ({
+  weekNum: "", year: new Date().getFullYear(),
+  mon: emptyDayData(), wed: emptyDayData(), fri: emptyDayData(), extra: emptyDayData(),
+});
+
+// Betongplattans lasermätning — global (plattan ändras inte vecka till vecka).
+// offsets: höjd per punkt i cm relativt referenspunkten (högsta = 0, övriga negativa).
+const emptySlab = () => {
+  const offsets = {};
+  ALL_POINTS.forEach(p => (offsets[p.id] = ""));
+  return { offsets, ref: "" };
+};
+
+const getWeekNumber = (d) => {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+};
+
+function getColor(val) {
+  const v = parseFloat(val);
+  if (isNaN(v)) return "#bfdbfe";
+  if (v < 2.0) return "#ef4444";
+  if (v < 2.5) return "#f97316";
+  if (v < 3.0) return "#facc15";
+  if (v < 4.0) return "#4ade80";
+  return "#0284c7";
+}
+
+// ── Voice helpers (parser) ───────────────────────────────────────────────────
+
+const SWEDISH_NUMS = {
+  // Svenska grundformer
+  "noll": "0", "en": "1", "ett": "1", "tva": "2", "två": "2", "tre": "3", "fyra": "4",
+  "fem": "5", "sex": "6", "sju": "7", "atta": "8", "åtta": "8", "nio": "9",
+  // Svenska bestämda former (sjuan, åttan, fyran...)
+  "nollan": "0", "ettan": "1", "tvaan": "2", "tvåan": "2", "trean": "3",
+  "fyran": "4", "femman": "5", "sexan": "6", "sjuan": "7",
+  "attan": "8", "åttan": "8", "nian": "9",
+  // Engelska
+  "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+  "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+  // Vanliga Whisper-feltolkningar
+  "shoe": "7", "sho": "7", "cho": "7", "jo": "7", "show": "7", "shoo": "7", "sjoo": "7",
+  "cool": "7", "ku": "7", "kool": "7",
+  "otto": "8", "otta": "8", "otha": "8", "auta": "8", "eta": "8", "ata": "8", "otan": "8",
+  "twa": "2", "tvah": "2", "fira": "4", "fura": "4", "vera": "4", "seya": "4", "seeya": "4",
+};
+const DECIMAL_WORDS = ["komma", "punkt", "och", "point"];
+
+const PHRASE_MAP = [
+  [/see\s+ya/g,    "4"],
+  [/c\s+ya/g,      "4"],
+  [/see\s+you/g,   "4"],
+  [/oh[,\s]+that/g, "8"],
+  [/oh\s+da/g,     "8"],
+];
+
+function parseVoiceInput(raw) {
+  let s = raw.toLowerCase().trim();
+  // Fras-ersättningar (multi-ord) före ordmatchning
+  PHRASE_MAP.forEach(([re, digit]) => { s = s.replace(re, digit); });
+  DECIMAL_WORDS.forEach(w => { s = s.replace(new RegExp("\\b" + w + "\\b", "g"), "."); });
+  Object.entries(SWEDISH_NUMS).forEach(([word, digit]) => {
+    s = s.replace(new RegExp("\\b" + word + "\\b", "g"), digit);
+  });
+  s = s.replace(/[,\/]/g, ".");
+  s = s.replace(/(\d)\s*\.\s*(\d)/g, "$1.$2");
+  s = s.replace(/(\d)\s+(\d)/g, "$1.$2");
+  const clean = s.replace(/[^\d.]/g, "");
+  const match = clean.match(/\d+\.?\d*/);
+  if (!match) return null;
+  const num = parseFloat(match[0]);
+  if (isNaN(num) || num < 0 || num > 9.9) return null;
+  return String(Math.round(num * 10) / 10);
+}
+
+// ── Whisper offline (lazy-loaded fallback) ───────────────────────────────────
+
+let whisperPipeline = null;
+let whisperState = "idle"; // "idle" | "loading" | "ready" | "error"
+let whisperCallbacks = [];
+
+async function loadWhisper(onProgress) {
+  if (whisperState === "ready") return whisperPipeline;
+  if (whisperState === "loading") return new Promise((res, rej) => whisperCallbacks.push({ res, rej }));
+  whisperState = "loading";
+  try {
+    await new Promise(resolve => {
+      if (window._transformersReady) { resolve(); return; }
+      window.addEventListener("transformers-ready", resolve, { once: true });
+      setTimeout(resolve, 30000);
+    });
+    const pipeline = window._transformersPipeline;
+    if (!pipeline) throw new Error("transformers.js laddades inte");
+    whisperPipeline = await pipeline("automatic-speech-recognition", "onnx-community/whisper-base", {
+      progress_callback: onProgress,
+    });
+    whisperState = "ready";
+    whisperCallbacks.forEach(c => c.res(whisperPipeline));
+  } catch(e) {
+    whisperState = "error";
+    whisperCallbacks.forEach(c => c.rej(e));
+    throw e;
+  } finally { whisperCallbacks = []; }
+  return whisperPipeline;
+}
+
+function recordAudio(onStop) {
+  return navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    const chunks = [];
+    const mr = new MediaRecorder(stream);
+    mr.ondataavailable = e => chunks.push(e.data);
+    mr.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      onStop(new Blob(chunks, { type: "audio/webm" }));
+    };
+    mr.start();
+    return mr;
+  });
+}
+
+async function blobToFloat32(blob) {
+  const arrayBuffer = await blob.arrayBuffer();
+  const audioCtx = new AudioContext({ sampleRate: 16000 });
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  audioCtx.close();
+  return audioBuffer.getChannelData(0);
+}
+
+// ── Text-to-speech ───────────────────────────────────────────────────────────
+
+function speakSwedish(text) {
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "sv-SE";
+  u.rate = 1.0;
+  // Try to find a Swedish voice, fall back to default
+  const voices = window.speechSynthesis.getVoices();
+  const svVoice = voices.find(v => v.lang.startsWith("sv"));
+  if (svVoice) u.voice = svVoice;
+  window.speechSynthesis.speak(u);
+}
+
+function valueToSwedish(val) {
+  // Convert "3.5" → "tre komma fem"
+  const nums = ["noll","ett","två","tre","fyra","fem","sex","sju","åtta","nio"];
+  const parts = String(val).split(".");
+  const hel = parseInt(parts[0]);
+  const dec = parts[1] ? parseInt(parts[1]) : null;
+  let s = nums[hel] !== undefined ? nums[hel] : val;
+  if (dec !== null) s += " komma " + (nums[dec] !== undefined ? nums[dec] : dec);
+  return s;
+}
+
+function pointToSwedish(pointId) {
+  // "I4" → "I fyra", "S12" → "S tolv"
+  const nums = ["noll","ett","två","tre","fyra","fem","sex","sju","åtta","nio"];
+  const prefix = pointId[0]; // "I" or "S"
+  const num = parseInt(pointId.slice(1));
+  let spoken;
+  if (num <= 9) spoken = nums[num];
+  else if (num === 10) spoken = "tio";
+  else if (num === 11) spoken = "elva";
+  else if (num === 12) spoken = "tolv";
+  else if (num === 13) spoken = "tretton";
+  else if (num === 14) spoken = "fjorton";
+  else if (num === 15) spoken = "femton";
+  else if (num === 16) spoken = "sexton";
+  else spoken = String(num);
+  return prefix + " " + spoken;
+}
+
+// ── MicButton ─────────────────────────────────────────────────────────────────
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function MicButton({ onResult, selectedPoint }) {
+  // Web Speech först överallt (även mobil) — Whisper laddas bara om den fallerar
+  const [mode, setMode] = useState(SpeechRecognition ? "web" : "whisper");
+  const [status, setStatus] = useState("ready");
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [whisperReady, setWhisperReady] = useState(whisperState === "ready");
+  const [lastHeard, setLastHeard] = useState("");
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef(null);
+  const recorderRef = useRef(null);
+
+  // Bara om Web Speech helt saknas i webbläsaren — ladda Whisper direkt
+  useEffect(() => {
+    if (!SpeechRecognition) triggerWhisperLoad();
+  }, []);
+
+  const triggerWhisperLoad = () => {
+    if (whisperState === "ready") { setWhisperReady(true); setStatus("ready"); return; }
+    setStatus("loading");
+    setLoadProgress(0);
+    loadWhisper(p => {
+      if (p.status === "progress" && p.total)
+        setLoadProgress(Math.round((p.loaded / p.total) * 100));
+    }).then(() => {
+      setWhisperReady(true);
+      setStatus("ready");
+    }).catch(e => {
+      whisperState = "idle"; // släpp låset så knappen kan försöka igen
+      setLastHeard("Röstmodell: " + (e && e.message ? e.message : "okänt fel"));
+      setStatus("loaderror");
+    });
+  };
+
+  // ── Web Speech ──────────────────────────────────────────────────────────────
+  const startWebSpeech = () => {
+    const rec = new SpeechRecognition();
+    rec.lang = "sv-SE";
+    rec.continuous = false;
+    rec.interimResults = true; // Android: sista interim-texten räddar oss om final aldrig kommer
+    rec.maxAlternatives = 3;
+    let gotResult = false;
+    let lastInterim = "";
+
+    // Tolka alternativen, plocka det första som ger en giltig siffra
+    const finish = (alternatives) => {
+      gotResult = true;
+      let transcript = "", val = null;
+      for (let i = 0; i < alternatives.length; i++) {
+        const alt = alternatives[i];
+        val = parseVoiceInput(alt);
+        if (val !== null) { transcript = alt; break; }
+        if (!transcript) transcript = alt;
+      }
+      setLastHeard(transcript);
+      if (val !== null) { setStatus("ok"); onResult(val); setTimeout(() => setStatus("ready"), 1500); }
+      else { setStatus("error"); setTimeout(() => setStatus("ready"), 2000); }
+    };
+
+    rec.onresult = (event) => {
+      const res = event.results[event.results.length - 1];
+      if (!res.isFinal) { lastInterim = res[0].transcript; return; }
+      const alts = [];
+      for (let i = 0; i < res.length; i++) alts.push(res[i].transcript);
+      finish(alts);
+    };
+
+    rec.onerror = (e) => {
+      gotResult = true; // prevent onend from double-erroring
+      setListening(false);
+      if (e.error === "network") {
+        setLastHeard("Inget nätverk — laddar offline-läge…");
+        setMode("whisper");
+        triggerWhisperLoad();
+      } else if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        setLastHeard("Mikrofonåtkomst nekad — tillåt mikrofon i webbläsaren");
+        setStatus("error");
+        setTimeout(() => setStatus("ready"), 4000);
+      } else {
+        setLastHeard(`Fel: ${e.error} — försök igen`);
+        setStatus("error");
+        setTimeout(() => setStatus("ready"), 2500);
+      }
+    };
+
+    rec.onend = () => {
+      setListening(false);
+      if (gotResult) return;
+      // Android: final-resultatet kan komma strax efter onend — eller aldrig
+      setTimeout(() => {
+        if (gotResult) return;
+        if (lastInterim) { finish([lastInterim]); return; } // använd det vi hann höra
+        setStatus("error");
+        setLastHeard("Ingen röst uppfångad — försök igen");
+        setTimeout(() => setStatus("ready"), 2000);
+      }, 1200);
+    };
+
+    try {
+      rec.start();
+      recognitionRef.current = rec;
+      setListening(true);
+      setStatus("listening");
+    } catch(e) {
+      // Web Speech finns men går inte att starta — fall tillbaka på offline-läge
+      setLastHeard(`Startfel: ${e.message} — byter till offline-läge…`);
+      setMode("whisper");
+      triggerWhisperLoad();
+    }
+  };
+
+  // ── Whisper ─────────────────────────────────────────────────────────────────
+  const startWhisper = async () => {
+    try {
+      const mr = await recordAudio((blob) => {
+        setStatus("processing");
+        blobToFloat32(blob).then(audio =>
+          whisperPipeline(audio, { task: "transcribe" })
+        ).then(result => {
+          const transcript = result.text || "";
+          setLastHeard(transcript);
+          const val = parseVoiceInput(transcript);
+          if (val !== null) { setStatus("ok"); onResult(val); setTimeout(() => setStatus("ready"), 1500); }
+          else { setStatus("error"); setTimeout(() => setStatus("ready"), 2000); }
+        }).catch(e => {
+          setLastHeard("FEL: " + e.message);
+          setStatus("error");
+          setTimeout(() => setStatus("ready"), 2000);
+        });
+      });
+      recorderRef.current = mr;
+      setListening(true);
+      setStatus("listening");
+    } catch(e) {
+      setLastHeard("Mikrofonfel: " + e.message);
+      setStatus("error");
+      setTimeout(() => setStatus("ready"), 2000);
+    }
+  };
+
+  const toggle = () => {
+    if (listening) {
+      if (mode === "web" && recognitionRef.current) recognitionRef.current.stop();
+      if (mode === "whisper" && recorderRef.current) recorderRef.current.stop();
+      setListening(false);
+    } else {
+      if (mode === "web") startWebSpeech();
+      else if (whisperReady) startWhisper();
+      else triggerWhisperLoad(); // ladda modellen / försök igen efter misslyckad laddning
+    }
+  };
+
+  const isLoading = status === "loading";
+  const isProcessing = status === "processing";
+  const isDisabled = isLoading || isProcessing;
+
+  const isError = status === "error" || status === "loaderror";
+
+  const bgColor = status === "ok" ? "#14532d" : isError ? "#450a0a" : listening ? "#dbeafe" : "#e8f0fb";
+  const borderColor = status === "ok" ? "#4ade80" : isError ? "#ef4444" : listening ? "#0284c7" : status === "ready" ? "#3b82f6" : "#93c5fd";
+  const textColor = listening ? "#0284c7" : status === "ok" ? "#4ade80" : isError ? "#ef4444" : status === "ready" ? "#1d4ed8" : "#475569";
+  const label = isLoading ? `Laddar röstmodell… ${loadProgress}%`
+    : status === "ready" ? "🎤 Tryck och tala"
+    : status === "listening" ? "⏹ Klar (tryck för att stoppa)"
+    : isProcessing ? "Bearbetar…"
+    : status === "ok" ? "✓ OK"
+    : status === "loaderror" ? "⚠ Röstmodell kunde inte laddas — tryck för att försöka igen"
+    : status === "error" ? "Hörde ej — försök igen"
+    : "…";
+
+  return (
+    <div style={{ marginBottom: "16px" }}>
+      {isLoading && (
+        <div style={{ background: "#e8f0fb", borderRadius: "4px", marginBottom: "6px", height: "4px", overflow: "hidden" }}>
+          <div style={{ height: "100%", width: loadProgress + "%", background: "#0284c7", borderRadius: "4px", transition: "width 0.3s" }} />
+        </div>
+      )}
+      <button onClick={toggle} disabled={isDisabled}
+        style={{
+          width: "100%", padding: "12px",
+          background: bgColor, border: `1px solid ${borderColor}`, borderRadius: "10px",
+          color: textColor, fontSize: "14px", fontWeight: "600",
+          cursor: isDisabled ? "wait" : "pointer",
+          transition: "all 0.15s", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+        }}>
+        {listening && <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#0284c7", animation: "pulse 0.8s infinite" }} />}
+        {isProcessing && <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#facc15", animation: "pulse 0.5s infinite" }} />}
+        {label}
+      </button>
+      {mode === "whisper" && whisperReady && (
+        <div style={{ fontSize: "10px", color: "#4ade80", textAlign: "center", marginTop: "4px", opacity: 0.7 }}>
+          Offline-läge aktivt
+        </div>
+      )}
+      {selectedPoint && !isLoading && (
+        <div style={{ fontSize: "11px", color: "#475569", textAlign: "center", marginTop: "5px" }}>
+          Aktiv punkt: <span style={{ color: "#0284c7", fontFamily: "'DM Mono',monospace", fontWeight: "700" }}>{selectedPoint}</span>
+          &nbsp;— tryck, tala, tryck igen
+        </div>
+      )}
+      {!selectedPoint && status === "ready" && (
+        <div style={{ fontSize: "11px", color: "#94a3b8", textAlign: "center", marginTop: "5px" }}>
+          Välj en punkt på rinken eller i listan först
+        </div>
+      )}
+      {lastHeard && (
+        <div style={{ fontSize: "11px", color: "#475569", textAlign: "center", marginTop: "4px",
+          background: "#e8f0fb", borderRadius: "4px", padding: "3px 8px", fontFamily: "'DM Mono',monospace" }}>
+          Hörde: <span style={{ color: "#0f172a" }}>"{lastHeard}"</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── SerialButton ──────────────────────────────────────────────────────────────
+
+function SerialButton({ onResult, selectedPoint }) {
+  const [status, setStatus] = useState("idle"); // idle | connecting | connected | error
+  const [lastValue, setLastValue] = useState("");
+  const disconnectRef = useRef(null);
+
+  if (!("serial" in navigator)) return null;
+
+  const connect = async () => {
+    setStatus("connecting");
+    try {
+      const port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 9600 });
+      const reader = port.readable.getReader();
+      let buffer = "";
+
+      setStatus("connected");
+
+      disconnectRef.current = async () => {
+        try { await reader.cancel(); } catch {}
+        try { await port.close(); } catch {}
+        setStatus("idle");
+        disconnectRef.current = null;
+      };
+
+      (async () => {
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += new TextDecoder().decode(value);
+            const lines = buffer.split(/[\r\n]+/);
+            buffer = lines.pop();
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              const num = parseFloat(line.replace(/[^\d.]/g, ""));
+              if (!isNaN(num) && num > 0 && num < 15) {
+                const val = String(Math.round(num * 10) / 10);
+                setLastValue(val);
+                onResult(val);
+              }
+            }
+          }
+        } catch (e) {
+          if (e.name !== "AbortError") {
+            setStatus("error");
+            setTimeout(() => setStatus("idle"), 3000);
+          }
+        } finally {
+          try { await port.close(); } catch {}
+          setStatus(s => s !== "error" ? "idle" : s);
+          disconnectRef.current = null;
+        }
+      })();
+
+    } catch (e) {
+      setStatus(e.name === "NotFoundError" ? "idle" : "error");
+      if (e.name !== "NotFoundError") setTimeout(() => setStatus("idle"), 3000);
+    }
+  };
+
+  const connected = status === "connected";
+  const bgColor    = connected ? "#14532d" : status === "error" ? "#450a0a" : "#f8fafc";
+  const borderColor= connected ? "#4ade80" : status === "error" ? "#ef4444" : "#d1ddf0";
+  const textColor  = connected ? "#4ade80" : status === "error" ? "#ef4444" : "#475569";
+  const label      = status === "connecting" ? "Ansluter…"
+    : connected ? "🔌 Ansluten — tryck för att koppla från"
+    : status === "error" ? "Anslutningsfel — försök igen"
+    : "🔌 Koppla mätare (USB)";
+
+  return (
+    <div style={{ marginBottom: "10px" }}>
+      <button
+        onClick={connected ? () => disconnectRef.current?.() : connect}
+        disabled={status === "connecting"}
+        style={{
+          width: "100%", padding: "10px",
+          background: bgColor, border: `1px solid ${borderColor}`, borderRadius: "10px",
+          color: textColor, fontSize: "13px", fontWeight: "600",
+          cursor: status === "connecting" ? "wait" : "pointer",
+          transition: "all 0.15s", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+        }}>
+        {connected && <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#4ade80", display: "inline-block", animation: "pulse 1.5s infinite" }} />}
+        {label}
+      </button>
+      {connected && (
+        <div style={{ fontSize: "11px", color: "#475569", textAlign: "center", marginTop: "5px" }}>
+          {selectedPoint
+            ? <>Aktiv punkt: <span style={{ color: "#0284c7", fontFamily: "'DM Mono',monospace", fontWeight: "700" }}>{selectedPoint}</span> — mät med instrumentet</>
+            : "Välj en punkt på rinken eller i listan"}
+        </div>
+      )}
+      {lastValue && connected && (
+        <div style={{ fontSize: "11px", color: "#475569", textAlign: "center", marginTop: "4px",
+          background: "#e8f0fb", borderRadius: "4px", padding: "3px 8px", fontFamily: "'DM Mono',monospace" }}>
+          Mätte: <span style={{ color: "#0f172a" }}>{lastValue} cm</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Heatmap helpers ───────────────────────────────────────────────────────────
+
+const COLOR_STOPS = [
+  { v: 0,   r: 239, g: 68,  b: 68  },
+  { v: 2.0, r: 239, g: 68,  b: 68  },
+  { v: 2.5, r: 249, g: 115, b: 22  },
+  { v: 3.0, r: 250, g: 204, b: 21  },
+  { v: 4.0, r: 74,  g: 222, b: 128 },
+  { v: 4.1, r: 2,   g: 132, b: 199 },
+  { v: 9.9, r: 2,   g: 132, b: 199 },
+];
+
+function valueToRGB(v) {
+  if (v <= COLOR_STOPS[0].v) return [COLOR_STOPS[0].r, COLOR_STOPS[0].g, COLOR_STOPS[0].b];
+  const last = COLOR_STOPS[COLOR_STOPS.length - 1];
+  if (v >= last.v) return [last.r, last.g, last.b];
+  for (let i = 0; i < COLOR_STOPS.length - 1; i++) {
+    const a = COLOR_STOPS[i], b = COLOR_STOPS[i + 1];
+    if (v >= a.v && v <= b.v) {
+      const t = (v - a.v) / (b.v - a.v);
+      return [
+        Math.round(a.r + t * (b.r - a.r)),
+        Math.round(a.g + t * (b.g - a.g)),
+        Math.round(a.b + t * (b.b - a.b)),
+      ];
+    }
+  }
+  return [74, 222, 128];
+}
+
+const DELTA_STOPS = [
+  { v: -2.0, r: 220, g: 38,  b: 38  },
+  { v: -0.5, r: 252, g: 165, b: 165 },
+  { v:  0,   r: 209, g: 213, b: 219 },
+  { v:  0.5, r: 147, g: 197, b: 253 },
+  { v:  2.0, r: 29,  g: 78,  b: 216 },
+];
+
+function deltaToRGB(v) {
+  const stops = DELTA_STOPS;
+  if (v <= stops[0].v) return [stops[0].r, stops[0].g, stops[0].b];
+  const last = stops[stops.length - 1];
+  if (v >= last.v) return [last.r, last.g, last.b];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i], b = stops[i + 1];
+    if (v >= a.v && v <= b.v) {
+      const t = (v - a.v) / (b.v - a.v);
+      return [
+        Math.round(a.r + t * (b.r - a.r)),
+        Math.round(a.g + t * (b.g - a.g)),
+        Math.round(a.b + t * (b.b - a.b)),
+      ];
+    }
+  }
+  return [209, 213, 219];
+}
+
+function getDeltaColor(delta) {
+  if (delta === null || isNaN(delta)) return "#d1d5db";
+  if (delta <= -1.5) return "#dc2626";
+  if (delta <= -0.5) return "#ef4444";
+  if (delta <  -0.1) return "#fca5a5";
+  if (delta <   0.1) return "#d1d5db";
+  if (delta <   0.5) return "#93c5fd";
+  if (delta <   1.5) return "#3b82f6";
+  return "#1d4ed8";
+}
+
+const HM_SCALE = 4;
+const HM_W = Math.round(58 * HM_SCALE);
+const HM_H = Math.round(96 * HM_SCALE);
+
+function buildHeatmap(vals, deltaVals = null) {
+  const isDelta = deltaVals !== null;
+  const src = isDelta ? deltaVals : vals;
+  const points = ALL_POINTS
+    .filter(p => src[p.id] !== null && src[p.id] !== "" && !isNaN(parseFloat(src[p.id])))
+    .map(p => ({
+      x: (p.x - 2) * HM_SCALE,
+      y: (p.y - 2) * HM_SCALE,
+      v: parseFloat(src[p.id]),
+    }));
+  if (points.length < 2) return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = HM_W;
+  canvas.height = HM_H;
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(HM_W, HM_H);
+  const d = img.data;
+
+  for (let py = 0; py < HM_H; py++) {
+    for (let px = 0; px < HM_W; px++) {
+      let wSum = 0, vSum = 0;
+      for (const p of points) {
+        const dx = px - p.x, dy = py - p.y;
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 < 1) { vSum = p.v; wSum = 1; break; }
+        const w = 1 / dist2;
+        wSum += w;
+        vSum += w * p.v;
+      }
+      const [r, g, b] = isDelta ? deltaToRGB(vSum / wSum) : valueToRGB(vSum / wSum);
+      const i = (py * HM_W + px) * 4;
+      d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 200;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas.toDataURL();
+}
+
+// ── RinkMap ───────────────────────────────────────────────────────────────────
+
+function RinkMap({ dayData, onSelect, selectedPoint, deltas, width = "65%" }) {
+  const vals = dayData?.values || {};
+  const [heatmapUrl, setHeatmapUrl] = useState("");
+
+  useEffect(() => {
+    const url = deltas ? buildHeatmap(vals, deltas) : buildHeatmap(vals);
+    setHeatmapUrl(url || "");
+  }, [dayData, deltas]);
+
+  return (
+    <div style={{ position: "relative", width, margin: "0 auto", paddingBottom: width === "65%" ? "105%" : "162%", userSelect: "none" }}>
+      <svg viewBox="0 0 62 100" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
+        <defs>
+          <clipPath id="rinkClip">
+            <rect x="2" y="2" width="58" height="96" rx="10" ry="10" />
+          </clipPath>
+        </defs>
+        <rect x="2" y="2" width="58" height="96" rx="10" ry="10" fill="#ffffff" stroke="#93c5fd" strokeWidth="0.5" />
+        {heatmapUrl && (
+          <image href={heatmapUrl} x="2" y="2" width="58" height="96" clipPath="url(#rinkClip)" opacity="0.72" />
+        )}
+        <line x1="2" y1="50" x2="60" y2="50" stroke="#93c5fd" strokeWidth="0.4" strokeDasharray="1,1" />
+        <line x1="2" y1="34" x2="60" y2="34" stroke="#3b82f6" strokeWidth="0.7" />
+        <line x1="2" y1="66" x2="60" y2="66" stroke="#3b82f6" strokeWidth="0.7" />
+        <line x1="4" y1="12" x2="58" y2="12" stroke="#fca5a5" strokeWidth="0.5" />
+        <line x1="4" y1="88" x2="58" y2="88" stroke="#fca5a5" strokeWidth="0.5" />
+        <circle cx="31" cy="50" r="9" fill="none" stroke="#93c5fd" strokeWidth="0.5" />
+        <circle cx="31" cy="50" r="0.9" fill="#93c5fd" />
+        <circle cx="31" cy="14" r="6" fill="none" stroke="#fce7f3" strokeWidth="0.5" />
+        <circle cx="31" cy="86" r="6" fill="none" stroke="#fce7f3" strokeWidth="0.5" />
+        <circle cx="18" cy="25" r="5" fill="none" stroke="#bfdbfe" strokeWidth="0.4" />
+        <circle cx="44" cy="25" r="5" fill="none" stroke="#bfdbfe" strokeWidth="0.4" />
+        <circle cx="18" cy="25" r="0.7" fill="#60a5fa" />
+        <circle cx="44" cy="25" r="0.7" fill="#60a5fa" />
+        <circle cx="18" cy="75" r="5" fill="none" stroke="#bfdbfe" strokeWidth="0.4" />
+        <circle cx="44" cy="75" r="5" fill="none" stroke="#bfdbfe" strokeWidth="0.4" />
+        <circle cx="18" cy="75" r="0.7" fill="#60a5fa" />
+        <circle cx="44" cy="75" r="0.7" fill="#60a5fa" />
+        <circle cx="31" cy="42" r="0.7" fill="#60a5fa" />
+        <circle cx="31" cy="58" r="0.7" fill="#60a5fa" />
+
+        {EDGE_POINTS.map(p => {
+          const v = vals[p.id];
+          const delta = deltas ? deltas[p.id] : null;
+          const fill = deltas ? getDeltaColor(delta) : getColor(v);
+          const sel = selectedPoint === p.id;
+          const label = deltas
+            ? (delta !== null ? (delta > 0 ? "+" : "") + delta : "")
+            : (v !== "" ? v : p.label.replace("S", ""));
+          return (
+            <g key={p.id} onClick={() => onSelect(p.id)} style={{ cursor: "pointer" }}>
+              <circle cx={p.x} cy={p.y} r={sel ? 3.6 : 3.0} fill={fill}
+                stroke={sel ? "#fff" : "#f0f4f8"} strokeWidth={sel ? 0.6 : 0.3}
+                style={{ filter: sel ? "drop-shadow(0 0 3px #0284c7)" : "none" }} />
+              <text x={p.x} y={p.y + 0.6} textAnchor="middle" dominantBaseline="middle"
+                fontSize="1.6" fontWeight="700" fill="#111" style={{ pointerEvents: "none" }}>
+                {label}
+              </text>
+            </g>
+          );
+        })}
+        {ICE_POINTS.map(p => {
+          const v = vals[p.id];
+          const delta = deltas ? deltas[p.id] : null;
+          const fill = deltas ? getDeltaColor(delta) : getColor(v);
+          const sel = selectedPoint === p.id;
+          const label = deltas
+            ? (delta !== null ? (delta > 0 ? "+" : "") + delta : "")
+            : (v !== "" ? v : p.label.replace("I", ""));
+          return (
+            <g key={p.id} onClick={() => onSelect(p.id)} style={{ cursor: "pointer" }}>
+              <rect x={p.x - 3.5} y={p.y - 2.6} width="7" height="5.2" rx="1.2"
+                fill={fill} stroke={sel ? "#fff" : "#f0f4f8"} strokeWidth={sel ? 0.5 : 0.25}
+                style={{ filter: sel ? "drop-shadow(0 0 3px #0284c7)" : "none" }} />
+              <text x={p.x} y={p.y + 0.6} textAnchor="middle" dominantBaseline="middle"
+                fontSize="1.6" fontWeight="700" fill="#111" style={{ pointerEvents: "none" }}>
+                {label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function Legend() {
+  const items = [
+    { color: "#ef4444", label: "< 2.0" }, { color: "#f97316", label: "2.0–2.5" },
+    { color: "#facc15", label: "2.5–3.0" }, { color: "#4ade80", label: "3.0–4.0" },
+    { color: "#0284c7", label: "≥ 4.0" },
+  ];
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "10px", justifyContent: "center" }}>
+      {items.map(i => (
+        <div key={i.label} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "#1d4ed8" }}>
+          <div style={{ width: 9, height: 9, borderRadius: "2px", background: i.color }} />{i.label} cm
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DeltaLegend() {
+  const items = [
+    { color: "#dc2626", label: "< −1.5" }, { color: "#fca5a5", label: "−1.5–0" },
+    { color: "#d1d5db", label: "±0" },
+    { color: "#93c5fd", label: "0–1.5" }, { color: "#1d4ed8", label: "> 1.5" },
+  ];
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "10px", justifyContent: "center" }}>
+      {items.map(i => (
+        <div key={i.label} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "#475569" }}>
+          <div style={{ width: 9, height: 9, borderRadius: "2px", background: i.color }} />{i.label} cm
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function getAllSessions(weeks) {
+  const sessions = [];
+  weeks.forEach((w, wi) => {
+    DAY_KEYS.forEach((key, di) => {
+      const d = w[key];
+      if (d && Object.values(d.values).some(v => v !== ""))
+        sessions.push({ weekIdx: wi, dayKey: key, label: `v.${w.weekNum} ${DAYS[di]}` });
+    });
+  });
+  return sessions;
+}
+
+function computeDeltas(fromData, toData) {
+  const deltas = {};
+  ALL_POINTS.forEach(p => {
+    const f = parseFloat(fromData?.values?.[p.id]);
+    const t = parseFloat(toData?.values?.[p.id]);
+    deltas[p.id] = (!isNaN(f) && !isNaN(t)) ? Math.round((t - f) * 10) / 10 : null;
+  });
+  return deltas;
+}
+
+// Referenspunkten väljs ALLTID explicit (tryck "ref"). Aldrig automatiskt —
+// annars blev den först ifyllda punkten referens och låstes till 0.
+function resolveSlabRef(slab) {
+  return (slab.ref && ALL_POINTS.some(p => p.id === slab.ref)) ? slab.ref : null;
+}
+
+const slabHasData = (slab) =>
+  ALL_POINTS.some(p => slab.offsets[p.id] !== "" && !isNaN(parseFloat(slab.offsets[p.id])));
+
+// Isytans höjd byggd från betongplattan: tjocklek + plattans offset (offset ≤ 0 = plattan lägre).
+// Per punkt och fristående — inget dras från någon annan punkts istjocklek. En jämn isyta
+// betyder att alla värden hamnar lika. Returneras som en dayData-liknande {values} så samma
+// tjocklek-palett/legend som rink 1 kan återanvändas. Referenspunktens offset = 0.
+function computeSurface(dayData, offsets, refId) {
+  const vals = dayData?.values || {};
+  const corrected = {};
+  let any = false;
+  ALL_POINTS.forEach(p => {
+    const t = parseFloat(vals[p.id]);
+    const off = p.id === refId ? 0 : parseFloat(offsets[p.id]);
+    if (!isNaN(t) && !isNaN(off)) { corrected[p.id] = String(Math.round((t + off) * 10) / 10); any = true; }
+    else corrected[p.id] = "";
+  });
+  return any ? { values: corrected } : null;
+}
+
+function DeltaPanel({ deltas, fromLabel, toLabel }) {
+  const entries = ALL_POINTS.map(p => ({ ...p, delta: deltas[p.id] })).filter(p => p.delta !== null);
+  if (entries.length === 0) return null;
+  const vals = entries.map(p => p.delta);
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const maxBuild = Math.max(...vals);
+  const maxRemove = Math.min(...vals);
+  const built = vals.filter(v => v > 0.1).length;
+  const removed = vals.filter(v => v < -0.1).length;
+  const unchanged = vals.length - built - removed;
+  const maxBuildPt = entries.find(p => p.delta === maxBuild);
+  const maxRemovePt = entries.find(p => p.delta === maxRemove);
+  const avgColor = avg > 0.1 ? "#1d4ed8" : avg < -0.1 ? "#dc2626" : "#475569";
+
+  return (
+    <div style={{ background: "#ffffff", borderRadius: "12px", border: "1px solid #d1ddf0", padding: "14px", marginTop: "12px" }}>
+      <div style={{ fontSize: "11px", color: "#475569", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "1px" }}>
+        {fromLabel} <span style={{ color: "#94a3b8" }}>→</span> {toLabel}
+      </div>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+        <Stat label="Snittförändring" value={(avg > 0 ? "+" : "") + avg.toFixed(2)} unit="cm" color={avgColor} />
+        <Stat label="Mest bygge" value={"+" + maxBuild.toFixed(1)} unit={maxBuildPt?.label || ""} color="#1d4ed8" />
+        <Stat label="Mest hyvling" value={maxRemove.toFixed(1)} unit={maxRemovePt?.label || ""} color="#dc2626" />
+      </div>
+      <div style={{ display: "flex", height: "8px", borderRadius: "4px", overflow: "hidden", marginBottom: "6px" }}>
+        <div style={{ flex: removed || 0.01, background: "#ef4444" }} />
+        <div style={{ flex: unchanged || 0.01, background: "#d1d5db" }} />
+        <div style={{ flex: built || 0.01, background: "#3b82f6" }} />
+      </div>
+      <div style={{ display: "flex", gap: "12px", fontSize: "10px" }}>
+        <span style={{ color: "#ef4444" }}>▼ {removed} nerhyvlade</span>
+        <span style={{ color: "#94a3b8" }}>= {unchanged} oförändrade</span>
+        <span style={{ color: "#3b82f6" }}>▲ {built} uppbyggda</span>
+      </div>
+    </div>
+  );
+}
+
+
+function Stat({ label, value, unit, color }) {
+  return (
+    <div style={{ background: "#eff6ff", borderRadius: "6px", padding: "6px 12px", textAlign: "center", flex: 1 }}>
+      <div style={{ fontSize: "10px", color: "#475569", marginBottom: "2px" }}>{label}</div>
+      <div style={{ fontSize: "18px", fontWeight: "800", color: color || "#0f172a", fontFamily: "'DM Mono',monospace" }}>
+        {value}<span style={{ fontSize: "11px", color: "#475569", marginLeft: "2px" }}>{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+function SectionDivider({ label }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "10px", margin: "4px 0 10px" }}>
+      <div style={{ flex: 1, height: "1px", background: "#d1ddf0" }} />
+      <div style={{ fontSize: "10px", fontWeight: "700", color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "1.5px", whiteSpace: "nowrap" }}>{label}</div>
+      <div style={{ flex: 1, height: "1px", background: "#d1ddf0" }} />
+    </div>
+  );
+}
+
+function PointInput({ point, value, selected, onChange, onFocus }) {
+  return (
+    <div style={{
+      background: selected ? "#dbeafe" : "#f8fafc",
+      border: `1px solid ${selected ? "#0284c7" : value ? getColor(value) + "88" : "#93c5fd"}`,
+      borderRadius: "6px", padding: "5px 7px", transition: "border-color 0.15s"
+    }}>
+      <div style={{ fontSize: "9px", color: "#475569", marginBottom: "2px", fontFamily: "'DM Mono',monospace" }}>{point.label.replace(/^[IS]/, "")}</div>
+      <input type="number" step="0.1" min="0" max="10" value={value}
+        onChange={e => onChange(e.target.value)} onFocus={onFocus} placeholder="–"
+        style={{ width: "100%", background: "transparent", border: "none", outline: "none",
+          color: value ? getColor(value) : "#94a3b8", fontSize: "15px", fontWeight: "700",
+          fontFamily: "'DM Mono',monospace", padding: 0 }} />
+      <div style={{ fontSize: "8px", color: "#94a3b8" }}>cm</div>
+    </div>
+  );
+}
+
+function InputGrid({ dayData, onChange, selectedPoint, onSelect }) {
+  const vals = dayData?.values || {};
+  const set = (id, val) => onChange({ ...dayData, values: { ...vals, [id]: val } });
+
+  // Advance to next point after voice input
+  const handleVoiceResult = useCallback((val) => {
+    if (!selectedPoint) return;
+    set(selectedPoint, val);
+    // Läs tillbaka på svenska
+    speakSwedish(pointToSwedish(selectedPoint) + ", " + valueToSwedish(val));
+    // Auto-advance to next point
+    const allIds = ALL_POINTS.map(p => p.id);
+    const idx = allIds.indexOf(selectedPoint);
+    if (idx >= 0 && idx < allIds.length - 1) {
+      setTimeout(() => onSelect(allIds[idx + 1]), 800);
+    }
+  }, [selectedPoint, vals, dayData]);
+
+  return (
+    <div>
+      <SerialButton onResult={handleVoiceResult} selectedPoint={selectedPoint} />
+      <MicButton onResult={handleVoiceResult} selectedPoint={selectedPoint} />
+
+      <SectionDivider label="Istjocklek" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px", marginBottom: "16px" }}>
+        {ICE_POINTS.map(p => <PointInput key={p.id} point={p} value={vals[p.id]} selected={selectedPoint === p.id} onChange={v => set(p.id, v)} onFocus={() => onSelect(p.id)} />)}
+      </div>
+      <SectionDivider label="Sparklist" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px", marginBottom: "16px" }}>
+        {EDGE_POINTS.map(p => <PointInput key={p.id} point={p} value={vals[p.id]} selected={selectedPoint === p.id} onChange={v => set(p.id, v)} onFocus={() => onSelect(p.id)} />)}
+      </div>
+      <SectionDivider label="Anteckning" />
+      <textarea value={dayData?.note || ""} onChange={e => onChange({ ...dayData, note: e.target.value })}
+        placeholder="T.ex. kallt väder, extra pådrag, avvikelser..." rows={2}
+        style={{ width: "100%", background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: "6px",
+          color: "#1e293b", padding: "8px", fontSize: "13px", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }} />
+    </div>
+  );
+}
+
+function TabBtn({ active, onClick, children }) {
+  return (
+    <button onClick={onClick} style={{ padding: "6px 14px", borderRadius: "6px",
+      background: active ? "#dbeafe" : "transparent",
+      border: `1px solid ${active ? "#0284c7" : "#d1ddf0"}`,
+      color: active ? "#0f172a" : "#475569", fontSize: "12px",
+      fontWeight: active ? "700" : "400", cursor: "pointer", transition: "all 0.15s" }}>
+      {children}
+    </button>
+  );
+}
+
+function BarChart({ points, currentVals, prevVals, title }) {
+  const n = points.length;
+  const VW = 320, VH = 170;
+  const padL = 24, padR = 6, padT = 8, padB = 20;
+  const cW = VW - padL - padR;
+  const cH = VH - padT - padB;
+
+  const allVals = points.flatMap(p => [currentVals[p.id], prevVals[p.id]])
+    .map(v => parseFloat(v)).filter(v => !isNaN(v) && v > 0);
+  const yMax = allVals.length ? Math.ceil(Math.max(...allVals)) + 0.5 : 5;
+
+  const slotW  = cW / n;
+  const barW   = Math.max(3, slotW * 0.36);
+  const toY    = v => padT + cH - (v / yMax) * cH;
+  const toBH   = v => Math.max(0, (v / yMax) * cH);
+  const yTicks = Array.from({ length: Math.ceil(yMax) + 1 }, (_, i) => i);
+
+  return (
+    <div>
+      {title && <div style={{ fontSize: "10px", fontWeight: "700", color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "1.5px", textAlign: "center", marginBottom: "4px" }}>{title}</div>}
+      <svg viewBox={`0 0 ${VW} ${VH}`} style={{ width: "100%", display: "block" }}>
+        {yTicks.map(v => (
+          <g key={v}>
+            <line x1={padL} y1={toY(v)} x2={VW - padR} y2={toY(v)} stroke={v === 0 ? "#94a3b8" : "#e2e8f0"} strokeWidth={v === 0 ? 0.8 : 0.5} />
+            <text x={padL - 3} y={toY(v)} fontSize="7" fill="#94a3b8" textAnchor="end" dominantBaseline="middle">{v}</text>
+          </g>
+        ))}
+        {points.map((p, i) => {
+          const cx   = padL + i * slotW + slotW / 2;
+          const prev = parseFloat(prevVals[p.id]);
+          const curr = parseFloat(currentVals[p.id]);
+          const num  = p.label.replace(/^[IS]/, "");
+          return (
+            <g key={p.id}>
+              {!isNaN(prev) && prev > 0 && <rect x={cx - barW - 0.5} y={toY(prev)} width={barW} height={toBH(prev)} fill="#ef4444" rx="1" opacity="0.8" />}
+              {!isNaN(curr) && curr > 0 && <rect x={cx + 0.5}        y={toY(curr)} width={barW} height={toBH(curr)} fill="#0284c7" rx="1" />}
+              <text x={cx} y={VH - padB + 9} fontSize="6.5" fill="#64748b" textAnchor="middle">{num}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function CompareView({ weeks, sessions }) {
+  const last = sessions.length;
+  const [fromKey, setFromKey] = useState(last >= 2 ? `${sessions[last-2].weekIdx}-${sessions[last-2].dayKey}` : "");
+  const [toKey,   setToKey]   = useState(last >= 1 ? `${sessions[last-1].weekIdx}-${sessions[last-1].dayKey}` : "");
+
+  const parseData = key => {
+    if (!key) return null;
+    const d = key.indexOf("-");
+    return weeks[parseInt(key.slice(0, d))]?.[key.slice(d + 1)] || null;
+  };
+
+  const fromVals = parseData(fromKey)?.values || {};
+  const toVals   = parseData(toKey)?.values   || {};
+  const hasData  = fromKey || toKey;
+
+  const selStyle = { width: "100%", padding: "6px 8px", background: "#f8fafc", border: "1px solid #d1ddf0", borderRadius: "6px", fontSize: "12px", color: "#1e293b" };
+
+  return (
+    <div style={{ maxWidth: "640px", margin: "0 auto", padding: "16px" }}>
+      <div style={{ background: "#ffffff", borderRadius: "12px", border: "1px solid #d1ddf0", padding: "14px", marginBottom: "12px" }}>
+        <div style={{ display: "flex", gap: "8px" }}>
+          {[{ lbl: "TIDIGARE", key: fromKey, set: setFromKey, color: "#ef4444" },
+            { lbl: "AKTUELL",  key: toKey,   set: setToKey,   color: "#0284c7" }].map(({ lbl, key, set, color }) => (
+            <div key={lbl} style={{ flex: 1 }}>
+              <div style={{ fontSize: "10px", color: "#475569", marginBottom: "3px", display: "flex", alignItems: "center", gap: "5px" }}>
+                <span style={{ width: 8, height: 8, background: color, borderRadius: "2px", display: "inline-block" }} />{lbl}
+              </div>
+              <select value={key} onChange={e => set(e.target.value)} style={selStyle}>
+                <option value="">Välj tillfälle…</option>
+                {sessions.map(s => {
+                  const k = `${s.weekIdx}-${s.dayKey}`;
+                  return <option key={k} value={k}>{s.label}</option>;
+                })}
+              </select>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {hasData ? (
+        <div style={{ background: "#ffffff", borderRadius: "12px", border: "1px solid #d1ddf0", padding: "14px" }}>
+          <BarChart points={ICE_POINTS}  currentVals={toVals} prevVals={fromVals} title="Istjocklek" />
+          <div style={{ height: "1px", background: "#e2e8f0", margin: "14px 0" }} />
+          <BarChart points={EDGE_POINTS} currentVals={toVals} prevVals={fromVals} title="Sparklist" />
+        </div>
+      ) : (
+        <div style={{ textAlign: "center", color: "#94a3b8", padding: "40px 20px", fontSize: "14px" }}>Välj två mättillfällen att jämföra</div>
+      )}
+    </div>
+  );
+}
+
+function WeekNav({ currentWeek, onNavigate }) {
+  const [editing, setEditing] = useState(null); // null | "week" | "year"
+  const [draft, setDraft] = useState("");
+
+  if (!currentWeek) return null;
+  const { weekNum, year } = currentWeek;
+
+  const go = (num, yr) => {
+    let w = num, y = yr;
+    if (w < 1)  { y--; w = 52; }
+    if (w > 52) { y++; w = 1; }
+    onNavigate(w, y);
+  };
+
+  const commitWeek = () => {
+    setEditing(null);
+    const n = parseInt(draft);
+    if (n >= 1 && n <= 52) go(n, year);
+  };
+
+  const commitYear = () => {
+    setEditing(null);
+    const y = parseInt(draft);
+    if (y >= 2000 && y <= 2100) go(weekNum, y);
+  };
+
+  const inputStyle = (w) => ({
+    width: w, textAlign: "center", fontFamily: "'DM Mono',monospace",
+    fontSize: "12px", fontWeight: "700", color: "#1d4ed8",
+    background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: "4px",
+    outline: "none", padding: "1px 2px",
+  });
+
+  const labelStyle = {
+    fontSize: "12px", fontWeight: "700", color: "#1d4ed8", cursor: "pointer",
+    borderBottom: "1px dashed #93c5fd", paddingBottom: "1px",
+  };
+
+  const btnStyle = {
+    background: "none", border: "none", cursor: "pointer",
+    color: "#1d4ed8", fontSize: "18px", fontWeight: "700",
+    padding: "0 3px", lineHeight: 1, userSelect: "none",
+  };
+
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: "1px", marginLeft: "10px", fontFamily: "'DM Mono',monospace" }}>
+      <button onClick={() => go(weekNum - 1, year)} style={btnStyle}>‹</button>
+      {editing === "week" ? (
+        <input autoFocus type="number" min="1" max="52" value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commitWeek}
+          onKeyDown={e => { if (e.key === "Enter") commitWeek(); if (e.key === "Escape") setEditing(null); }}
+          style={inputStyle("34px")} />
+      ) : (
+        <span onClick={() => { setDraft(String(weekNum)); setEditing("week"); }} title="Klicka för att byta vecka" style={labelStyle}>
+          v.{weekNum}
+        </span>
+      )}
+      <span style={{ color: "#94a3b8", margin: "0 2px", fontSize: "12px" }}> </span>
+      {editing === "year" ? (
+        <input autoFocus type="number" min="2000" max="2100" value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commitYear}
+          onKeyDown={e => { if (e.key === "Enter") commitYear(); if (e.key === "Escape") setEditing(null); }}
+          style={inputStyle("52px")} />
+      ) : (
+        <span onClick={() => { setDraft(String(year)); setEditing("year"); }} title="Klicka för att byta år" style={labelStyle}>
+          {year}
+        </span>
+      )}
+      <button onClick={() => go(weekNum + 1, year)} style={btnStyle}>›</button>
+    </div>
+  );
+}
+
+const RINK_TITLE = { fontSize: "11px", fontWeight: "700", color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "1px", textAlign: "center", marginBottom: "6px" };
+
+function LevelnessPlaceholder({ hasData, onCalibrate }) {
+  let msg, showBtn = false;
+  if (!hasData) { msg = "Ingen kalibrering än. Ange lasermätning av betongplattan för att se hur jämn isytan är."; showBtn = true; }
+  else { msg = "Mät minst en punkt (som även har plattoffset) för att visa nivån."; }
+  return (
+    <div style={{ border: "1px dashed #bfdbfe", borderRadius: "10px", padding: "24px 16px", textAlign: "center", color: "#64748b", fontSize: "12px", lineHeight: 1.5 }}>
+      {msg}
+      {showBtn && (
+        <div style={{ marginTop: "10px" }}>
+          <button onClick={onCalibrate} style={{ fontSize: "12px", padding: "6px 14px", borderRadius: "6px", background: "#dbeafe", border: "1px solid #0284c7", color: "#0284c7", cursor: "pointer", fontWeight: "600" }}>
+            Öppna kalibrering
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SlabInput({ point, value, isRef, onChange, onSetRef }) {
+  return (
+    <div style={{
+      background: isRef ? "#dbeafe" : "#f8fafc",
+      border: `1px solid ${isRef ? "#0284c7" : value !== "" ? "#93c5fd" : "#d1ddf0"}`,
+      borderRadius: "6px", padding: "5px 7px",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
+        <span style={{ fontSize: "9px", color: "#475569", fontFamily: "'DM Mono',monospace" }}>{point.label}</span>
+        <span onClick={onSetRef} title="Sätt som referenspunkt (0)" style={{ fontSize: "8px", cursor: "pointer", fontWeight: "700", letterSpacing: "0.5px", color: isRef ? "#0284c7" : "#cbd5e1" }}>
+          {isRef ? "REF" : "ref"}
+        </span>
+      </div>
+      {isRef ? (
+        <div style={{ fontSize: "15px", fontWeight: "700", color: "#0284c7", fontFamily: "'DM Mono',monospace" }}>0</div>
+      ) : (
+        <input type="number" step="0.1" max="0" value={value}
+          onChange={e => onChange(e.target.value)} placeholder="–"
+          style={{ width: "100%", background: "transparent", border: "none", outline: "none",
+            color: value !== "" ? "#0f172a" : "#94a3b8", fontSize: "15px", fontWeight: "700",
+            fontFamily: "'DM Mono',monospace", padding: 0 }} />
+      )}
+      <div style={{ fontSize: "8px", color: "#94a3b8" }}>cm</div>
+    </div>
+  );
+}
+
+function CalibrationView({ slab, refId, onChange }) {
+  const offsets = slab.offsets;
+  const setOff = (id, v) => onChange({ ...slab, offsets: { ...offsets, [id]: v } });
+  // Referens är av/på; rör inte det lagrade värdet (visas som 0 så länge punkten är referens).
+  const setRef = (id) => onChange({ ...slab, ref: slab.ref === id ? "" : id });
+
+  const entered = ALL_POINTS.map(p => (p.id === refId ? 0 : parseFloat(offsets[p.id]))).filter(v => !isNaN(v));
+  const lowest = entered.length ? Math.min(...entered) : null;
+  const spread = entered.length ? Math.max(...entered) - Math.min(...entered) : null;
+
+  return (
+    <div style={{ maxWidth: "640px", margin: "0 auto", padding: "16px" }}>
+      <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "12px", padding: "14px", marginBottom: "12px", fontSize: "13px", color: "#1e293b", lineHeight: 1.5 }}>
+        <b>Kalibrering av betongplattan</b><br />
+        Ange lasermätt höjd per borrpunkt i cm, relativt den högsta punkten (referens = 0).
+        Eftersom referensen är högst blir övriga värden <b>negativa</b> — plattan ligger lägre där.
+        Andra rinken visar sedan <b>isytans höjd</b> per punkt = istjocklek + plattans offset, byggd från betongplattan.
+        En jämn isyta betyder att alla värden hamnar lika. Tryck på <b>ref</b> på den högsta punkten så låses den till 0.
+      </div>
+
+      {refId && (
+        <div style={{ background: "#ffffff", border: "1px solid #d1ddf0", borderRadius: "12px", padding: "14px", marginBottom: "12px", display: "flex", gap: "8px" }}>
+          <Stat label="Referenspunkt" value={refId} unit="" color="#0284c7" />
+          <Stat label="Lägsta platta" value={lowest != null ? lowest.toFixed(1) : "–"} unit="cm" color="#dc2626" />
+          <Stat label="Höjdskillnad" value={spread != null ? spread.toFixed(1) : "–"} unit="cm" color="#1d4ed8" />
+        </div>
+      )}
+
+      <div style={{ background: "#ffffff", border: "1px solid #d1ddf0", borderRadius: "12px", padding: "16px" }}>
+        <SectionDivider label="Istjocklek-punkter" />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px", marginBottom: "16px" }}>
+          {ICE_POINTS.map(p => <SlabInput key={p.id} point={p} value={offsets[p.id]} isRef={refId === p.id} onChange={v => setOff(p.id, v)} onSetRef={() => setRef(p.id)} />)}
+        </div>
+        <SectionDivider label="Sparklist-punkter" />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
+          {EDGE_POINTS.map(p => <SlabInput key={p.id} point={p} value={offsets[p.id]} isRef={refId === p.id} onChange={v => setOff(p.id, v)} onSetRef={() => setRef(p.id)} />)}
+        </div>
+      </div>
+
+      <button onClick={() => { if (confirm("Rensa all kalibrering?")) onChange(emptySlab()); }}
+        style={{ marginTop: "12px", padding: "8px 16px", background: "transparent", border: "1px solid #93c5fd", borderRadius: "6px", color: "#475569", fontSize: "12px", cursor: "pointer", width: "100%" }}>
+        Rensa kalibrering
+      </button>
+    </div>
+  );
+}
+
+// ── Molnsynk (SharePoint via Microsoft Graph) ─────────────────────────────────
+// Ersatte Cloudflare Worker + KV när Borrmall flyttade in i Sportrond. Skälet är
+// inte bekvämlighet: den lösningen vilade på en delad hemlighet i klartext här i
+// filen, och Sportronds repo publiceras av GitHub Pages — hemligheten hade blivit
+// läsbar för vem som helst. Nu autentiseras varje användare som sig själv med
+// sitt Nacka-konto, och det finns ingen hemlighet kvar att läcka.
+//
+// Kontraktet mot resten av appen är oförändrat: syncGet() ger { rev, updatedAt,
+// data } och syncPut(data, baseRev) ger detsamma eller { conflict: true, ... }.
+// Skillnaden är att rev nu är filens etag i stället för ett heltal — koden
+// jämför bara likhet, aldrig ordning, så det spelar ingen roll.
+const CLIENT_ID    = "adaf5794-4c0e-4901-847c-bce56968a30b";
+const TENANT_ID    = "85f1def1-344e-41f0-b8fe-137f2800f31a";
+const REDIRECT_URI = "https://nord0084.github.io/Sportrond/";
+const SP_HOST      = "nacka.sharepoint.com";
+const SP_SITE_PATH = "/sites/Idrottsdriften-verlmningarochprotokoll";
+const GRAPH        = "https://graph.microsoft.com/v1.0";
+const SCOPES       = ["https://graph.microsoft.com/Sites.ReadWrite.All"];
+const DATAFIL      = "borrmall-data.json";   // i sitens dokumentbibliotek
+const SYNC_ENABLED = true;
+const POLL_MS = 15000;
+
+const msalInstance = typeof msal !== "undefined" ? new msal.PublicClientApplication({
+  auth:  { clientId: CLIENT_ID, authority: `https://login.microsoftonline.com/${TENANT_ID}`, redirectUri: REDIRECT_URI },
+  cache: { cacheLocation: "sessionStorage" }
+}) : null;
+
+// Samma flik och samma origin som Sportrond ⇒ samma sessionStorage, alltså
+// samma inloggning. Saknas konto loggar vi INTE in härifrån: redirect-URI:n är
+// registrerad för Sportronds rot, så användaren hade landat där ändå. Bättre
+// att säga det rakt ut än att kasta iväg någon utan förklaring.
+const ärInloggad = () => !!(msalInstance && msalInstance.getAllAccounts().length);
+
+async function getToken() {
+  const account = msalInstance.getAllAccounts()[0];
+  if (!account) throw new Error("not_logged_in");
+  return (await msalInstance.acquireTokenSilent({ scopes: SCOPES, account })).accessToken;
+}
+
+async function gFetch(path, opts = {}) {
+  const token = await getToken();
+  const res = await fetch(path.startsWith("http") ? path : GRAPH + path, {
+    ...opts,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(opts.headers || {}) }
+  });
+  if (!res.ok) {
+    const fel = new Error(`Graph ${res.status}`);
+    fel.status = res.status;
+    throw fel;
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+// Site-id slås upp en gång och återanvänds. Promisen cachas, inte värdet, så
+// parallella anrop under uppstarten inte gör var sin uppslagning.
+let siteIdPromise = null;
+const getSiteId = () => (siteIdPromise ||= gFetch(`/sites/${SP_HOST}:${SP_SITE_PATH}`).then(s => s.id));
+
+const TOMT_DOK = () => ({ rev: "", updatedAt: 0, data: { weeks: [], slab: emptySlab() } });
+
+async function syncGet() {
+  const siteId = await getSiteId();
+  let meta;
+  try {
+    meta = await gFetch(`/sites/${siteId}/drive/root:/${DATAFIL}`);
+  } catch (e) {
+    if (e.status === 404) return TOMT_DOK();   // första gången: filen finns inte än
+    throw e;
+  }
+  const token = await getToken();
+  const r = await fetch(`${GRAPH}/sites/${siteId}/drive/items/${meta.id}/content`,
+                        { headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) throw new Error("Innehåll " + r.status);
+  return { rev: meta.eTag || "", updatedAt: Date.parse(meta.lastModifiedDateTime) || 0, data: await r.json() };
+}
+
+async function syncPut(data, baseRev) {
+  const siteId = await getSiteId();
+
+  // Utan baseRev vet vi inte vad vi skriver ovanpå. Finns filen redan är det en
+  // krock att behandla som vilken annan — annars hade en tidig skrivning kunnat
+  // radera någon annans arbete innan första pollen hunnit hem.
+  if (!baseRev) {
+    const nuvarande = await syncGet();
+    if (nuvarande.updatedAt) return { conflict: true, ...nuvarande };
+  }
+
+  const token   = await getToken();
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  if (baseRev) headers["if-match"] = baseRev;
+
+  const r = await fetch(`${GRAPH}/sites/${siteId}/drive/root:/${DATAFIL}:/content`,
+                        { method: "PUT", headers, body: JSON.stringify(data) });
+  if (r.status === 412 || r.status === 409) return { conflict: true, ...(await syncGet()) };
+  if (!r.ok) throw new Error("PUT " + r.status);
+
+  const item = await r.json();
+  return { rev: item.eTag || "", updatedAt: Date.parse(item.lastModifiedDateTime) || 0, data };
+}
+
+// Fältnivå-merge så två operatörer aldrig skriver över varandra. Tomma fält ger
+// alltid vika för ifyllda; vid äkta krock avgör preferB (den "nyare" sidan).
+const isEmptyVal = v => v === undefined || v === null || v === "";
+function mergeVal(a, b, preferB) {
+  if (isEmptyVal(a)) return isEmptyVal(b) ? "" : b;
+  if (isEmptyVal(b)) return a;
+  if (a === b) return a;
+  return preferB ? b : a;
+}
+function mergeDay(a, b, preferB) {
+  a = a || emptyDayData(); b = b || emptyDayData();
+  const values = {};
+  ALL_POINTS.forEach(p => { values[p.id] = mergeVal(a.values?.[p.id], b.values?.[p.id], preferB); });
+  return { values, note: mergeVal(a.note, b.note, preferB) };
+}
+function mergeWeek(a, b, preferB) {
+  const w = { weekNum: a.weekNum, year: a.year };
+  DAY_KEYS.forEach(k => { w[k] = mergeDay(a[k], b[k], preferB); });
+  return w;
+}
+function mergeWeeks(a = [], b = [], preferB) {
+  const map = new Map();
+  const key = w => `${w.year}-${w.weekNum}`;
+  a.forEach(w => map.set(key(w), w));
+  b.forEach(w => { const k = key(w); map.set(k, map.has(k) ? mergeWeek(map.get(k), w, preferB) : w); });
+  return [...map.values()].sort((x, y) => (x.year - y.year) || (x.weekNum - y.weekNum));
+}
+function mergeSlab(a, b, preferB) {
+  a = a || emptySlab(); b = b || emptySlab();
+  const offsets = {};
+  ALL_POINTS.forEach(p => { offsets[p.id] = mergeVal(a.offsets?.[p.id], b.offsets?.[p.id], preferB); });
+  return { offsets, ref: mergeVal(a.ref, b.ref, preferB) };
+}
+function mergeData(local, remote, preferRemote) {
+  const r = remote || {};
+  return {
+    weeks: mergeWeeks(local.weeks, r.weeks || [], preferRemote),
+    slab:  mergeSlab(local.slab, r.slab, preferRemote),
+  };
+}
+
+function SyncBadge({ sync }) {
+  const map = {
+    connecting: { c: "#f59e0b", t: "Ansluter…" },
+    syncing:    { c: "#f59e0b", t: "Synkar…" },
+    synced:     { c: "#22c55e", t: "Synkad" },
+    offline:    { c: "#ef4444", t: "Offline" },
+  };
+  const s = map[sync.status] || map.connecting;
+  return (
+    <div title={sync.at ? "Senast: " + new Date(sync.at).toLocaleTimeString("sv-SE") : ""}
+      style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "10px",
+        color: "#475569", background: "#f8fafc", border: "1px solid #e2e8f0",
+        borderRadius: "20px", padding: "3px 9px", marginLeft: "8px", verticalAlign: "middle" }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: s.c,
+        animation: sync.status === "syncing" || sync.status === "connecting" ? "pulse 1s infinite" : "none" }} />
+      {s.t}
+    </div>
+  );
+}
+
+function App() {
+  const [weeks, setWeeks] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("borrmall_weeks") || "[]"); } catch { return []; }
+  });
+  const [slab, setSlab] = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem("borrmall_slab"));
+      return s && s.offsets ? s : emptySlab();
+    } catch { return emptySlab(); }
+  });
+  const [currentWeekIdx, setCurrentWeekIdx] = useState(null);
+  const [activeDay, setActiveDay] = useState("mon");
+  const [selectedPoint, setSelectedPoint] = useState(null);
+  const [view, setView] = useState("input");
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareFrom, setCompareFrom] = useState(null);
+  const [compareTo, setCompareTo] = useState(null);
+  const touchStartX = useRef(null);
+  const [sync, setSync] = useState({ status: "connecting", at: null });
+  // Refs så synk-callbacks kan läsa senaste state utan att bytas ut varje render.
+  const weeksRef = useRef(weeks);        weeksRef.current = weeks;
+  const slabDataRef = useRef(slab);      slabDataRef.current = slab;
+  const curIdxRef = useRef(currentWeekIdx);   curIdxRef.current = currentWeekIdx;
+  const cmpFromRef = useRef(null);            cmpFromRef.current = compareFrom;
+  const cmpToRef = useRef(null);              cmpToRef.current = compareTo;
+  const revRef = useRef(0);          // serverns rev vi senast känner till (för baseRev)
+  const appliedRef = useRef(-1);     // serverns updatedAt vi senast tillämpat
+  const lastPushedRef = useRef("");  // JSON av data som matchar serverns baslinje
+  const pushingRef = useRef(false);
+  const VIEWS = ["input", "compare", "history"];
+  const handleTouchStart = e => { touchStartX.current = e.touches[0].clientX; };
+  const handleTouchEnd   = e => {
+    if (touchStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(dx) > 60) {
+      const idx = VIEWS.indexOf(view);
+      if (dx < 0 && idx < VIEWS.length - 1) setView(VIEWS[idx + 1]);
+      if (dx > 0 && idx > 0)                setView(VIEWS[idx - 1]);
+    }
+    touchStartX.current = null;
+  };
+
+  useEffect(() => {
+    try { localStorage.setItem("borrmall_weeks", JSON.stringify(weeks)); } catch {}
+  }, [weeks]);
+
+  useEffect(() => {
+    try { localStorage.setItem("borrmall_slab", JSON.stringify(slab)); } catch {}
+  }, [slab]);
+
+  // Tillämpa ett serverdokument: merga in i lokal data och remappa index. Stabil ([]).
+  const applyRemote = useCallback((doc, preferRemote) => {
+    const oldWeeks = weeksRef.current;
+    const local = { weeks: oldWeeks, slab: slabDataRef.current };
+    const merged = mergeData(local, doc.data, preferRemote);
+    const idOf = i => (i != null && oldWeeks[i]) ? oldWeeks[i] : null;
+    const findIdx = w => w ? merged.weeks.findIndex(x => x.weekNum === w.weekNum && x.year === w.year) : -1;
+
+    revRef.current = doc.rev || 0;
+    appliedRef.current = doc.updatedAt || 0;
+    lastPushedRef.current = JSON.stringify({ weeks: (doc.data?.weeks) || [], slab: (doc.data?.slab) || emptySlab() });
+
+    setWeeks(merged.weeks);
+    setSlab(merged.slab);
+    // Behåll aktuell vecka / jämförelseval trots ev. omsortering.
+    const ci = findIdx(idOf(curIdxRef.current)); if (ci >= 0) setCurrentWeekIdx(ci);
+    const remap = (ref, setter) => {
+      const r = ref.current; if (!r) return;
+      const ni = findIdx(idOf(r.weekIdx));
+      setter(ni >= 0 ? { weekIdx: ni, dayKey: r.dayKey } : null);
+    };
+    remap(cmpFromRef, setCompareFrom);
+    remap(cmpToRef, setCompareTo);
+  }, []);
+
+  const doPush = useCallback(async (snapshot) => {
+    if (pushingRef.current) return;
+    pushingRef.current = true;
+    try {
+      setSync(s => ({ ...s, status: "syncing" }));
+      const res = await syncPut(JSON.parse(snapshot), revRef.current);
+      if (res.conflict) {
+        applyRemote(res, false);           // serverns ändringar mergas, våra värden vinner krock; push-effekten skickar unionen igen
+      } else {
+        revRef.current = res.rev;
+        appliedRef.current = res.updatedAt;
+        lastPushedRef.current = snapshot;
+        setSync({ status: "synced", at: Date.now() });
+      }
+    } catch (e) {
+      setSync({ status: "offline", at: Date.now() });
+    } finally { pushingRef.current = false; }
+  }, [applyRemote]);
+
+  // Hämta + poll: dra in andras ändringar.
+  useEffect(() => {
+    if (!SYNC_ENABLED) return;
+    let alive = true;
+    const pull = async () => {
+      try {
+        const doc = await syncGet();
+        if (!alive) return;
+        if ((doc.updatedAt || 0) !== appliedRef.current) applyRemote(doc, true);
+        setSync(s => ({ status: "synced", at: Date.now() }));
+      } catch (e) { if (alive) setSync({ status: "offline", at: Date.now() }); }
+    };
+    pull();
+    const iv = setInterval(pull, POLL_MS);
+    return () => { alive = false; clearInterval(iv); };
+  }, [applyRemote]);
+
+  // Skicka lokala ändringar (debouncad) när de avviker från serverns baslinje.
+  const dataJson = useMemo(() => JSON.stringify({ weeks, slab }), [weeks, slab]);
+  useEffect(() => {
+    if (!SYNC_ENABLED) return;
+    if (dataJson === lastPushedRef.current) return;
+    const t = setTimeout(() => doPush(dataJson), 1200);
+    return () => clearTimeout(t);
+  }, [dataJson, doPush]);
+
+  useEffect(() => {
+    const now = new Date();
+    const weekNum = getWeekNumber(now);
+    const year = now.getFullYear();
+    const idx = weeks.findIndex(w => w.weekNum === weekNum && w.year === year);
+    if (idx >= 0) { setCurrentWeekIdx(idx); }
+    else {
+      const newWeek = { ...emptyWeek(), weekNum, year };
+      setWeeks(prev => { const u = [...prev, newWeek]; setCurrentWeekIdx(u.length - 1); return u; });
+    }
+  }, []);
+
+  const currentWeek = currentWeekIdx !== null ? weeks[currentWeekIdx] : null;
+  const updateDayData = (key, data) => setWeeks(prev => prev.map((w, i) => i === currentWeekIdx ? { ...w, [key]: data } : w));
+
+  const navigateToWeek = useCallback((weekNum, year) => {
+    const idx = weeks.findIndex(w => w.weekNum === weekNum && w.year === year);
+    if (idx >= 0) {
+      setCurrentWeekIdx(idx);
+    } else {
+      setWeeks(prev => {
+        const newWeek = { ...emptyWeek(), weekNum, year };
+        const u = [...prev, newWeek];
+        setCurrentWeekIdx(u.length - 1);
+        return u;
+      });
+    }
+  }, [weeks]);
+  const dayData = currentWeek?.[activeDay];
+
+  const sessions = getAllSessions(weeks);
+  const deltas = compareMode && compareFrom && compareTo
+    ? computeDeltas(weeks[compareFrom.weekIdx]?.[compareFrom.dayKey], weeks[compareTo.weekIdx]?.[compareTo.dayKey])
+    : null;
+  const compareFromLabel = compareFrom ? (sessions.find(s => s.weekIdx === compareFrom.weekIdx && s.dayKey === compareFrom.dayKey)?.label || "") : "";
+  const compareToLabel   = compareTo   ? (sessions.find(s => s.weekIdx === compareTo.weekIdx   && s.dayKey === compareTo.dayKey)?.label   || "") : "";
+  const rinkDataForCompare = compareTo ? weeks[compareTo.weekIdx]?.[compareTo.dayKey] : dayData;
+
+  const hasSlab = slabHasData(slab);
+  const slabRef = resolveSlabRef(slab);
+  const surface = useMemo(
+    () => hasSlab ? computeSurface(dayData, slab.offsets, slabRef) : null,
+    [dayData, slab, slabRef, hasSlab]
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f0f4f8", color: "#1e293b", fontFamily: "'Inter','Segoe UI',sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap');
+        * { box-sizing: border-box; }
+        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+        input[type=number] { -moz-appearance: textfield; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #f0f4f8; }
+        ::-webkit-scrollbar-thumb { background: #bfdbfe; border-radius: 2px; }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(1.4); }
+        }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ background: "#ffffff", borderBottom: "1px solid #d1ddf0", padding: "12px 16px",
+        display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
+        <div>
+          <div style={{ fontSize: "11px", color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "2px", marginBottom: "1px" }}>
+            <a href="./" style={{ color: "#1d4ed8", textDecoration: "none", marginRight: "8px" }}>← Sportrond</a>
+            Ishall · Istjocklek{SYNC_ENABLED && <SyncBadge sync={sync} />}
+          </div>
+          <div style={{ fontSize: "18px", fontWeight: "800", color: "#0f172a", letterSpacing: "-0.5px" }}>
+            Borrmall
+            {currentWeek && <WeekNav currentWeek={currentWeek} onNavigate={navigateToWeek} />}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <TabBtn active={view === "input"}   onClick={() => setView("input")}>Mätning</TabBtn>
+          <TabBtn active={view === "compare"} onClick={() => setView("compare")}>Jämförelse</TabBtn>
+          <TabBtn active={view === "history"} onClick={() => setView("history")}>Historik</TabBtn>
+          <TabBtn active={view === "calibration"} onClick={() => setView("calibration")}>Kalibrering</TabBtn>
+        </div>
+      </div>
+
+      <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+
+      {view === "compare" && <CompareView weeks={weeks} sessions={sessions} />}
+
+      {view === "input" && (
+        <div style={{ maxWidth: "640px", margin: "0 auto", padding: "16px" }}>
+          {/* Day tabs */}
+          <div style={{ display: "flex", gap: "6px", marginBottom: "16px" }}>
+            {DAY_KEYS.map((key, i) => {
+              const d = currentWeek?.[key];
+              const filled = d ? Object.values(d.values).some(v => v !== "") : false;
+              return (
+                <button key={key} onClick={() => setActiveDay(key)} style={{
+                  flex: 1, padding: "8px 4px", background: activeDay === key ? "#dbeafe" : "#ffffff",
+                  border: `1px solid ${activeDay === key ? "#0284c7" : filled ? "#3b82f6" : "#d1ddf0"}`,
+                  borderRadius: "8px", color: activeDay === key ? "#0f172a" : "#475569",
+                  fontSize: "12px", fontWeight: activeDay === key ? "700" : "400",
+                  cursor: "pointer", transition: "all 0.15s", position: "relative" }}>
+                  {DAYS[i]}
+                  {filled && <div style={{ position: "absolute", top: "3px", right: "4px", width: "5px", height: "5px", borderRadius: "50%", background: "#4ade80" }} />}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Rink */}
+          <div style={{ background: "#ffffff", borderRadius: "12px", border: "1px solid #d1ddf0", padding: "12px", marginBottom: "12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", position: "relative" }}>
+              <div style={{ position: "absolute", left: 0, right: 0, textAlign: "center", fontSize: "11px", color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "1px", pointerEvents: "none" }}>
+                {compareMode ? "Jämförelsevy" : "Rinkvy — tryck på punkt för att välja"}
+              </div>
+              <div />
+              <button onClick={() => setCompareMode(m => !m)} style={{
+                fontSize: "11px", padding: "4px 10px", borderRadius: "6px",
+                background: compareMode ? "#dbeafe" : "transparent",
+                border: `1px solid ${compareMode ? "#0284c7" : "#d1ddf0"}`,
+                color: compareMode ? "#0284c7" : "#475569", cursor: "pointer",
+              }}>
+                {compareMode ? "✕ Stäng" : "⇄ Jämför"}
+              </button>
+            </div>
+
+            {compareMode && (
+              <div style={{ display: "flex", gap: "8px", marginBottom: "10px" }}>
+                {[{ label: "FRÅN", val: compareFrom, set: setCompareFrom }, { label: "TILL", val: compareTo, set: setCompareTo }].map(({ label, val, set }) => (
+                  <div key={label} style={{ flex: 1 }}>
+                    <div style={{ fontSize: "10px", color: "#475569", marginBottom: "3px" }}>{label}</div>
+                    <select
+                      value={val ? `${val.weekIdx}-${val.dayKey}` : ""}
+                      onChange={e => {
+                        if (!e.target.value) { set(null); return; }
+                        const [wi, dk] = e.target.value.split("-");
+                        set({ weekIdx: parseInt(wi), dayKey: dk });
+                      }}
+                      style={{ width: "100%", padding: "6px", background: "#f8fafc", border: "1px solid #d1ddf0", borderRadius: "6px", fontSize: "12px", color: "#1e293b" }}>
+                      <option value="">Välj tillfälle…</option>
+                      {sessions.map(s => (
+                        <option key={`${s.weekIdx}-${s.dayKey}`} value={`${s.weekIdx}-${s.dayKey}`}>{s.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {compareMode ? (
+              <>
+                <RinkMap dayData={rinkDataForCompare} onSelect={() => {}} selectedPoint={null} deltas={deltas} />
+                <DeltaLegend />
+              </>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: "flex-start", justifyContent: "center" }}>
+                <div style={{ flex: "1 1 240px", minWidth: "200px" }}>
+                  <div style={RINK_TITLE}>Istjocklek</div>
+                  <RinkMap dayData={dayData} onSelect={setSelectedPoint} selectedPoint={selectedPoint} width="100%" />
+                  <Legend />
+                </div>
+                <div style={{ flex: "1 1 240px", minWidth: "200px" }}>
+                  <div style={RINK_TITLE}>Isjämnhet (tjocklek + platta)</div>
+                  {surface ? (
+                    <>
+                      <RinkMap dayData={surface} onSelect={setSelectedPoint} selectedPoint={selectedPoint} width="100%" />
+                      <Legend />
+                    </>
+                  ) : (
+                    <LevelnessPlaceholder hasData={hasSlab} onCalibrate={() => setView("calibration")} />
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {compareMode && deltas && <DeltaPanel deltas={deltas} fromLabel={compareFromLabel} toLabel={compareToLabel} />}
+
+          <div style={{ background: "#ffffff", borderRadius: "12px", border: "1px solid #d1ddf0", padding: "16px", marginTop: "16px" }}>
+            <div style={{ fontSize: "12px", color: "#0f172a", fontWeight: "700", marginBottom: "12px" }}>Ange mätvärden (cm)</div>
+            {dayData && (
+              <InputGrid
+                dayData={dayData}
+                onChange={d => updateDayData(activeDay, d)}
+                selectedPoint={selectedPoint}
+                onSelect={setSelectedPoint}
+              />
+            )}
+          </div>
+
+          <button onClick={() => { if (confirm("Rensa alla värden för denna dag?")) updateDayData(activeDay, emptyDayData()); }}
+            style={{ marginTop: "12px", padding: "8px 16px", background: "transparent", border: "1px solid #93c5fd", borderRadius: "6px", color: "#475569", fontSize: "12px", cursor: "pointer", width: "100%" }}>
+            Rensa dag
+          </button>
+        </div>
+      )}
+
+      {view === "history" && (
+        <div style={{ maxWidth: "640px", margin: "0 auto", padding: "16px" }}>
+          <div style={{ fontSize: "13px", color: "#475569", marginBottom: "16px" }}>{weeks.length} veckor sparade</div>
+          {[...weeks].reverse().map((week, ri) => {
+            const idx = weeks.length - 1 - ri;
+            return (
+              <div key={idx} style={{ background: "#ffffff", border: `1px solid ${idx === currentWeekIdx ? "#0284c7" : "#d1ddf0"}`, borderRadius: "10px", padding: "14px", marginBottom: "10px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                  <div style={{ fontWeight: "700", fontSize: "14px" }}>
+                    Vecka {week.weekNum}, {week.year}
+                    {idx === currentWeekIdx && <span style={{ marginLeft: "8px", fontSize: "10px", color: "#0284c7", background: "#0a2a4a", padding: "2px 6px", borderRadius: "4px" }}>AKTUELL</span>}
+                  </div>
+                  <button onClick={() => { setCurrentWeekIdx(idx); setView("input"); }}
+                    style={{ fontSize: "11px", color: "#0284c7", background: "transparent", border: "1px solid #1e4a7a", borderRadius: "4px", padding: "3px 8px", cursor: "pointer" }}>
+                    Öppna
+                  </button>
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {DAY_KEYS.map((key, i) => {
+                    const d = week[key];
+                    const vs = Object.values(d.values).filter(v => v !== "").map(Number);
+                    const avg = vs.length ? (vs.reduce((a, b) => a + b, 0) / vs.length).toFixed(1) : null;
+                    return (
+                      <div key={key} style={{ background: "#e8f0fb", borderRadius: "6px", padding: "6px 10px", minWidth: "60px", border: `1px solid ${avg ? getColor(avg) + "66" : "#d1ddf0"}` }}>
+                        <div style={{ fontSize: "9px", color: "#475569", marginBottom: "2px" }}>{DAYS[i]}</div>
+                        <div style={{ fontSize: "14px", fontWeight: "700", color: avg ? getColor(avg) : "#bfdbfe", fontFamily: "'DM Mono',monospace" }}>{avg ? avg + " cm" : "–"}</div>
+                        <div style={{ fontSize: "8px", color: "#94a3b8" }}>{vs.length} pt</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          {weeks.length === 0 && <div style={{ textAlign: "center", color: "#94a3b8", padding: "40px", fontSize: "14px" }}>Ingen historik än. Börja mäta!</div>}
+        </div>
+      )}
+
+      {view === "calibration" && <CalibrationView slab={slab} refId={slabRef} onChange={setSlab} />}
+
+      </div>
+    </div>
+  );
+}
+
+
+    function Inloggningskrav() {
+      return (
+        <div style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          padding: "48px 24px", textAlign: "center", color: "#0f172a" }}>
+          <div style={{ fontSize: "44px", marginBottom: "14px" }}>🧊</div>
+          <h1 style={{ fontSize: "22px", margin: "0 0 8px" }}>Borrmall</h1>
+          <p style={{ fontSize: "14px", color: "#475569", lineHeight: 1.5, maxWidth: "320px", margin: "0 auto 24px" }}>
+            Du behöver vara inloggad med ditt Nacka-konto för att mätningarna ska
+            kunna sparas. Logga in i Sportrond först — inloggningen gäller sedan
+            för båda apparna.
+          </p>
+          <a href="./" style={{ display: "inline-block", background: "#1D9E75", color: "#fff",
+            padding: "13px 22px", borderRadius: "10px", textDecoration: "none", fontWeight: 600 }}>
+            Till Sportrond
+          </a>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(ärInloggad() ? <App /> : <Inloggningskrav />);
+  </script>
+</body>
+</html>
