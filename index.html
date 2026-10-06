@@ -81,6 +81,9 @@ select { width: 100%; padding: 12px 14px; border: 0.5px solid var(--color-border
 .avv-item p { font-size: 13px; margin-top: 4px; line-height: 1.4; }
 .avv-item .meta { font-size: 11px; color: var(--color-text-secondary); margin-top: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .atg-btn { font-size: 12px; padding: 5px 12px; border-radius: 6px; border: 0.5px solid var(--color-border-secondary); background: transparent; color: var(--color-text-secondary); cursor: pointer; white-space: nowrap; }
+.arende-nr { font-size: 11px; color: var(--color-text-secondary); }
+.arende-text { white-space: pre-line; }
+.synkfel { font-size: 12px; color: #dc2626; margin-top: 6px; }
 .atg-btn.done { background: var(--color-background-success); color: var(--color-text-success); border-color: var(--color-border-success); }
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; align-items: flex-end; justify-content: center; padding: 0; }
 .modal-overlay.open { display: flex; }
@@ -215,6 +218,38 @@ textarea { width: 100%; border: 0.5px solid var(--color-border-secondary); borde
   </div>
 </div>
 
+<div class="screen" id="screen-arenden">
+  <div class="topbar">
+    <div class="topbar-row"><h1>Ärenden</h1></div>
+    <div class="tab-pills mode-pills">
+      <button class="pill mode-pill active" data-mode="sporthall" onclick="setMode('sporthall',this)">Sporthall</button>
+      <button class="pill mode-pill" data-mode="ishall" onclick="setMode('ishall',this)">Ishall</button>
+    </div>
+  </div>
+  <div class="section">
+    <div class="tab-pills">
+      <button class="pill arende-pill active" onclick="setArendeTab('oppna',this)">Öppna</button>
+      <button class="pill arende-pill" onclick="setArendeTab('klara',this)">Klara</button>
+    </div>
+    <div class="filter-row">
+      <select id="arende-filter-anl" onchange="renderArenden()"></select>
+    </div>
+    <div id="arende-list"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="klar-modal" onclick="if (event.target === this) closeKlarModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h2 id="klar-title"></h2>
+    <div class="hint">Vad gjordes? Texten skickas till Matrix42 som lösning på ärendet.</div>
+    <textarea id="klar-input" placeholder="T.ex. Bytt lysrör i omklädningsrum 3"></textarea>
+    <div class="modal-btns">
+      <button onclick="closeKlarModal()">Avbryt</button>
+      <button class="btn-save" onclick="sparaKlar()">Klarmarkera</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="avvik-modal" onclick="handleOverlayClick(event)">
   <div class="modal" onclick="event.stopPropagation()">
     <h2 id="modal-title"></h2>
@@ -231,6 +266,7 @@ textarea { width: 100%; border: 0.5px solid var(--color-border-secondary); borde
   <button class="nav-btn active" onclick="goTo('rondering',this)"><span class="nav-icon">☑️</span>Rondering</button>
   <button class="nav-btn" onclick="goTo('historik',this)"><span class="nav-icon">📋</span>Historik</button>
   <button class="nav-btn" onclick="goTo('avvikelser',this)"><span class="nav-icon">⚠️</span>Avvikelser</button>
+  <button class="nav-btn" onclick="goTo('arenden',this)"><span class="nav-icon">📨</span>Ärenden</button>
   <!-- Egen sida, inte en vy: Borrmall är React och skulle tvinga alla som bara
        ska bocka av en checklista att ladda React, ReactDOM och Babel. Samma
        flik och samma origin gör att MSAL-sessionen följer med dit. -->
@@ -262,6 +298,27 @@ const COL_A = {
   ronderingId:'RonderingId', anlaggning:'Anlaggning', typ:'Typ',
   kategori:'Kategori', hint:'Hint', anteckning:'Anteckning',
   datum:'Datum', atgardad:'Atgardad', atgardadDatum:'AtgardadDatum'
+};
+
+// Arenden kommer från Matrix42. Appen pratar aldrig med Matrix42 själv —
+// API-nyckeln kan inte ligga i en publik sida. En mellanhand (ej byggd än)
+// för in ärenden hit och stänger dem i Matrix42 när Status blir 'klar'.
+// Arenden columns: Title (rubrik), MatrixGuid, Arendenummer, Anlaggning,
+//                  Beskrivning, Inkom, Status, Losning, KlarDatum, KlarAv, SynkFel
+// MatrixGuid läses inte av appen, men det är den Matrix42:s ticket/close
+// vill ha — ärendenumret räcker inte.
+// Status är koder, inte svenska ord, så mellanhanden kan filtrera på dem
+// utan att å/ä/ö kommer i vägen:
+//   oppen  – inkommet från Matrix42, väntar på åtgärd
+//   klar   – klarmarkerat i appen, väntar på att mellanhanden stänger det
+//   stangd – stängt i Matrix42 (av mellanhanden, eller direkt där)
+// Mellanhanden ska bara agera på 'klar' — annars studsar dess egna
+// skrivningar tillbaka som nya klarmarkeringar. Den ska också skriva med
+// if-match, så att en klarmarkering som ångras mitt i inte körs över.
+const COL_E = {
+  nummer:'Arendenummer', anlaggning:'Anlaggning', beskrivning:'Beskrivning',
+  inkom:'Inkom', status:'Status', losning:'Losning',
+  klarDatum:'KlarDatum', klarAv:'KlarAv', synkFel:'SynkFel'
 };
 
 // ============================================================
@@ -380,7 +437,7 @@ function nyEtag(objekt, svar) {
 // ============================================================
 // SharePoint init
 // ============================================================
-let siteId = null, rListId = null, aListId = null;
+let siteId = null, rListId = null, aListId = null, eListId = null;
 
 async function initSharePoint() {
   const site  = await gFetch(`/sites/${SP_HOST}:${SP_SITE_PATH}`);
@@ -389,10 +446,13 @@ async function initSharePoint() {
   for (const l of lists) {
     if (l.displayName === 'Ronderingar') rListId = l.id;
     if (l.displayName === 'Avvikelser')  aListId = l.id;
+    if (l.displayName === 'Arenden')     eListId = l.id;
   }
   if (!rListId || !aListId) {
     throw new Error('Hittade inte listorna "Ronderingar" och/eller "Avvikelser" i SharePoint. Kontrollera listnamnen.');
   }
+  // Arenden är valfri: saknas den fungerar ronderingarna som förut och
+  // fliken Ärenden säger att listan inte finns.
 }
 
 // ============================================================
@@ -537,6 +597,53 @@ async function updateAvvikelse(avv) {
 }
 
 // ============================================================
+// Data: ärenden från Matrix42
+// ============================================================
+let arenden = [];
+
+async function loadArenden() {
+  if (!eListId) { arenden = []; return; }
+  const items = await gGetAll(`/sites/${siteId}/lists/${eListId}/items?expand=fields`);
+  arenden = items.map(item => {
+    const f = item.fields;
+    return {
+      spId:        item.id,
+      etag:        item['@odata.etag'] || null,
+      rubrik:      f.Title                  || '',
+      nummer:      f[COL_E.nummer]          || '',
+      anlaggning:  f[COL_E.anlaggning]      || '',
+      beskrivning: f[COL_E.beskrivning]     || '',
+      inkom:       visaDatum(f[COL_E.inkom]),
+      status:      f[COL_E.status]          || 'oppen',
+      losning:     f[COL_E.losning]         || '',
+      klarDatum:   visaDatum(f[COL_E.klarDatum]),
+      klarAv:      f[COL_E.klarAv]          || '',
+      synkFel:     f[COL_E.synkFel]         || ''
+    };
+  });
+  arenden.sort((a, b) => b.inkom.localeCompare(a.inkom) || b.spId - a.spId);
+}
+
+// Skriver både klarmarkering och ångring. SynkFel nollas i båda fallen:
+// ett gammalt fel från mellanhanden gäller inte ett nytt försök.
+// Textfälten töms med '' — null är bara nödvändigt för datumen.
+async function updateArende(a) {
+  const klar = a.status === 'klar';
+  const svar = await gFetch(`/sites/${siteId}/lists/${eListId}/items/${a.spId}`, {
+    method: 'PATCH',
+    headers: ifMatch(a.etag),
+    body: JSON.stringify({ fields: {
+      [COL_E.status]:    a.status,
+      [COL_E.losning]:   a.losning,
+      [COL_E.klarDatum]: klar ? spDatum(new Date()) : null,
+      [COL_E.klarAv]:    klar ? a.klarAv : '',
+      [COL_E.synkFel]:   ''
+    }})
+  });
+  nyEtag(a, svar);
+}
+
+// ============================================================
 // Loading state
 // ============================================================
 function showLoading(text) {
@@ -550,6 +657,8 @@ function hideLoading() {
 // ============================================================
 // App init
 // ============================================================
+let inloggadNamn = '';
+
 async function initApp() {
   const accounts = msalInstance.getAllAccounts();
   if (!accounts.length) return;
@@ -561,8 +670,8 @@ async function initApp() {
     await loadLogs();
     hideLoading();
 
-    const name = accounts[0].name || accounts[0].username;
-    document.getElementById('user-label').textContent = name;
+    inloggadNamn = accounts[0].name || accounts[0].username;
+    document.getElementById('user-label').textContent = inloggadNamn;
     document.getElementById('login-overlay').style.display = 'none';
 
     buildAnlSelect();
@@ -692,9 +801,11 @@ function setMode(mode, btn) {
   document.querySelectorAll('.mode-pill').forEach(p => p.classList.toggle('active', p.dataset.mode === mode));
   buildAnlSelect();
   buildAvvFilter();
+  buildArendeFilter();
   const active = document.querySelector('.screen.active').id;
   if (active === 'screen-historik')   renderHistorik();
   if (active === 'screen-avvikelser') renderAvvikelser();
+  if (active === 'screen-arenden')    renderArenden();
 }
 
 function buildAnlSelect() {
@@ -704,6 +815,11 @@ function buildAnlSelect() {
 
 function buildAvvFilter() {
   document.getElementById('avv-filter-anl').innerHTML =
+    ['<option value="">Alla anläggningar</option>', ...anlaggningar().map(a => `<option>${a}</option>`)].join('');
+}
+
+function buildArendeFilter() {
+  document.getElementById('arende-filter-anl').innerHTML =
     ['<option value="">Alla anläggningar</option>', ...anlaggningar().map(a => `<option>${a}</option>`)].join('');
 }
 
@@ -719,12 +835,16 @@ async function goTo(tab, btn) {
     buildAvvFilter();
     await refreshAndRender(renderAvvikelser);
   }
+  if (tab === 'arenden') {
+    buildArendeFilter();
+    await refreshAndRender(renderArenden, loadArenden);
+  }
 }
 
-async function refreshAndRender(renderFn) {
+async function refreshAndRender(renderFn, loader = loadLogs) {
   try {
     showLoading('Laddar...');
-    await loadLogs();
+    await loader();
     hideLoading();
   } catch (e) {
     hideLoading();
@@ -1099,6 +1219,117 @@ async function toggleAtgardad(li, ai) {
     a.atgDatum = wasDatum;
     renderAvvikelser();
   }
+}
+
+// ============================================================
+// UI: ärenden
+// ============================================================
+let arendeTab  = 'oppna';
+let klarArende = null;
+
+// Matrix42 vet inget om appens lägen, så typen härleds ur anläggningen.
+// En anläggning som stavas annorlunda i Matrix42 ger null och visas då i
+// båda lägena — hellre det än att ärendet tyst försvinner.
+function arendeTyp(anl) {
+  if (ANLAGGNINGAR_IS.includes(anl)) return 'ishall';
+  if (ANLAGGNINGAR.includes(anl))    return 'sporthall';
+  return null;
+}
+
+function setArendeTab(t, btn) {
+  arendeTab = t;
+  document.querySelectorAll('.arende-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  renderArenden();
+}
+
+function renderArenden() {
+  const el = document.getElementById('arende-list');
+  if (!eListId) {
+    el.innerHTML = '<div class="empty">Listan "Arenden" finns inte i SharePoint ännu.</div>';
+    return;
+  }
+  const filterAnl = document.getElementById('arende-filter-anl').value;
+  const items = arenden.map((a, i) => ({ a, i })).filter(({ a }) => {
+    const typ = arendeTyp(a.anlaggning);
+    if (typ && typ !== currentMode) return false;
+    if (filterAnl && a.anlaggning !== filterAnl) return false;
+    return arendeTab === 'oppna' ? a.status === 'oppen' : a.status !== 'oppen';
+  });
+  if (!items.length) {
+    el.innerHTML = `<div class="empty">${arendeTab === 'oppna' ? 'Inga öppna ärenden.' : 'Inga klarmarkerade ärenden.'}</div>`;
+    return;
+  }
+  el.innerHTML = items.map(({ a, i }) => {
+    const nr   = a.nummer ? `<div class="arende-nr">${escHtml(a.nummer)}</div>` : '';
+    const besk = a.beskrivning ? `<p class="arende-text">${escHtml(a.beskrivning)}</p>` : '';
+    const plats = `${escHtml(a.anlaggning || 'Okänd anläggning')} · inkom ${escHtml(a.inkom)}`;
+    const fel  = a.synkFel ? `<div class="synkfel">Matrix42: ${escHtml(a.synkFel)}</div>` : '';
+    if (a.status === 'oppen') {
+      return `<div class="avv-item"><h3>${escHtml(a.rubrik)}</h3>${nr}${besk}${fel}<div class="meta"><span>${plats}</span><button class="atg-btn" onclick="openKlarModal(${i})">✅ Klarmarkera</button></div></div>`;
+    }
+    const losning = `<p class="arende-text"><b>Åtgärd:</b> ${escHtml(a.losning)}</p>`;
+    const vem     = `${escHtml(a.klarDatum)}${a.klarAv ? ' · ' + escHtml(a.klarAv) : ''}`;
+    const knapp   = a.status === 'klar'
+      ? `<button class="atg-btn" onclick="angraKlar(${i})">↩ Ångra</button>`
+      : `<button class="atg-btn done" disabled>✓ Stängd i Matrix42</button>`;
+    const vantar  = a.status === 'klar' ? '<div class="arende-nr">Väntar på att stängas i Matrix42</div>' : '';
+    return `<div class="avv-item atgardad"><h3>${escHtml(a.rubrik)}</h3>${nr}${besk}${losning}${vantar}${fel}<div class="meta"><span>${plats}<br>Klar ${vem}</span>${knapp}</div></div>`;
+  }).join('');
+}
+
+function openKlarModal(i) {
+  klarArende = i;
+  const a = arenden[i];
+  document.getElementById('klar-title').textContent = a.rubrik;
+  // Förifyllt om ärendet klarmarkerats förut och sedan ångrats
+  document.getElementById('klar-input').value = a.losning || '';
+  document.getElementById('klar-modal').classList.add('open');
+  setTimeout(() => document.getElementById('klar-input').focus(), 100);
+}
+
+function closeKlarModal() {
+  document.getElementById('klar-modal').classList.remove('open');
+  klarArende = null;
+}
+
+// Gemensamt för klarmarkera och ångra: ändra lokalt, skriv, och backa till
+// det SharePoint faktiskt har om skrivningen misslyckas.
+async function skrivArende(a, andring) {
+  const fore = { ...a };
+  Object.assign(a, andring);
+  try {
+    showLoading('Sparar...');
+    await updateArende(a);
+    hideLoading();
+  } catch (e) {
+    Object.assign(a, fore);
+    hideLoading();
+    alert(ärKrock(e) ? KROCKTEXT : 'Kunde inte spara: ' + e.message);
+    console.error(e);
+  }
+  renderArenden();
+}
+
+async function sparaKlar() {
+  const a     = arenden[klarArende];
+  const text  = document.getElementById('klar-input').value.trim();
+  // Matrix42:s ticket/close kräver en lösningstext. Utan den skulle
+  // mellanhanden inte kunna stänga ärendet, och felet syntes först senare.
+  if (!text) { alert('Skriv vad som gjordes. Matrix42 kräver en lösningstext för att stänga ärendet.'); return; }
+  closeKlarModal();
+  await skrivArende(a, {
+    status: 'klar', losning: text, synkFel: '',
+    klarAv: inloggadNamn, klarDatum: new Date().toLocaleDateString('sv-SE')
+  });
+}
+
+// Bara möjligt medan ärendet väntar på mellanhanden. När det väl är
+// stängt i Matrix42 finns inget att ångra härifrån.
+async function angraKlar(i) {
+  const a = arenden[i];
+  if (!confirm(`Ångra klarmarkeringen av "${a.rubrik}"?\n\nÄrendet flyttas tillbaka till Öppna.`)) return;
+  await skrivArende(a, { status: 'oppen', synkFel: '', klarAv: '', klarDatum: '' });
 }
 
 // ============================================================
