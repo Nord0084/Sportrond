@@ -148,10 +148,24 @@ const PHRASE_MAP = [
   [/oh\s+da/g,     "8"],
 ];
 
+function kombineraTal(tal) {
+  if (tal.length === 1) return tal[0];
+  if (tal[0] >= 20 && tal[0] % 10 === 0 && tal.slice(1).every(n => n < 10))
+    return tal.reduce((a, b) => a + b, 0);        // "trettio fem" = 35
+  if (tal.every(n => n < 10))
+    return Number(tal.join(""));                  // "tre fem" = 35, siffra för siffra
+  return tal[0];
+}
+
 function parseVoiceInput(raw) {
   let s = raw.toLowerCase().trim();
   // Fras-ersättningar (multi-ord) före ordmatchning
   PHRASE_MAP.forEach(([re, digit]) => { s = s.replace(re, digit); });
+
+  // Hundratal lossas först ur ordet, så "hundrasjuttiofem" blir "100 sjuttiofem"
+  // och resten tolkas som vanligt. Sparklisten mäter 150–200 mm.
+  s = s.replace(/\b(?:(ett|en|två|tva|tre)\s*)?hundra/g,
+    (_, e) => " " + (e ? ENTAL[e] : 1) * 100 + " ");
 
   // Sammansatta tiotal först. "trettiofem" är ett enda ord, och slår man isär
   // orden innan skulle ordmatchningen bara hitta "trettio" och tappa femman.
@@ -172,17 +186,16 @@ function parseVoiceInput(raw) {
   if (!tal.length) return null;
 
   let v;
-  if (tal.length === 1) {
-    v = tal[0];
-  } else if (tal[0] >= 20 && tal[0] % 10 === 0 && tal.slice(1).every(n => n < 10)) {
-    v = tal.reduce((a, b) => a + b, 0);          // "trettio fem" = 35
-  } else if (tal.every(n => n < 10)) {
-    v = Number(tal.join(""));                     // "tre fem" = 35, siffra för siffra
+  if (tal.length > 1 && tal[0] >= 100 && tal[0] % 100 === 0) {
+    const rest = kombineraTal(tal.slice(1));      // "hundra sjuttio fem" = 175
+    v = rest < 100 ? tal[0] + rest : tal[0];
   } else {
-    v = tal[0];
+    v = kombineraTal(tal);
   }
 
-  if (isNaN(v) || v < 0 || v > 150) return null;
+  // Taket fångar skräp som "2024", inte riktiga mätvärden — sparklisten
+  // ligger runt 170 mm, så det gamla taket på 150 avvisade dem tyst.
+  if (isNaN(v) || v < 0 || v > 300) return null;
   return String(Math.round(v));
 }
 
@@ -961,7 +974,7 @@ function PointInput({ point, value, selected, onChange, onFocus }) {
       borderRadius: "6px", padding: "5px 7px", transition: "border-color 0.15s"
     }}>
       <div style={{ fontSize: "9px", color: "#475569", marginBottom: "2px", fontFamily: "'DM Mono',monospace" }}>{point.label.replace(/^[IS]/, "")}</div>
-      <input type="number" step="1" min="0" max="150" value={value}
+      <input type="number" step="1" min="0" max="300" value={value}
         onChange={e => onChange(e.target.value)} onFocus={onFocus} placeholder="–"
         style={{ width: "100%", background: "transparent", border: "none", outline: "none",
           color: value ? getColor(value) : "#94a3b8", fontSize: "15px", fontWeight: "700",
