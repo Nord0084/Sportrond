@@ -384,14 +384,61 @@ function logout() {
 // ============================================================
 // Graph API helpers
 // ============================================================
+// Nytt försök vid nätverksfel ("Failed to fetch") och vid 429/503/504, där
+// Graph uttryckligen ber oss vänta. Mobilnätet i hallarna är svajigt, och
+// annars fick personalen trycka igen själva.
+//
+// Nätverksfel försöker vi bara om för GET, PATCH och DELETE. Ett nätverksfel
+// säger inte om anropet kom fram, och en POST som gjorts om kan skapa en
+// dubbelpost. PATCH och DELETE går med if-match, så där syns det i stället
+// på nästa försök: 412 respektive 404 betyder att det första kom fram.
+const OMFORSOK_VANTAN = [1000, 3000];   // ms före försök 2 och 3
+
+const vänta = ms => new Promise(r => setTimeout(r, ms));
+
+async function graphAnrop(url, init) {
+  const metod = (init.method || 'GET').toUpperCase();
+  let natfelInnan = false;
+  for (let forsok = 0; ; forsok++) {
+    const token = await getToken();
+    let res;
+    try {
+      res = await fetch(url, {
+        ...init,
+        // init.headers sist: annars gick if-match aldrig fram, det skrevs över här.
+        headers: { Authorization: `Bearer ${token}`, ...(init.headers || {}) }
+      });
+    } catch (e) {
+      if (metod !== 'POST' && forsok < OMFORSOK_VANTAN.length) {
+        natfelInnan = true;
+        await vänta(OMFORSOK_VANTAN[forsok]);
+        continue;
+      }
+      const fel = new Error('Ingen kontakt med SharePoint. Kontrollera nätet och försök igen.');
+      fel.natfel = true;
+      throw fel;
+    }
+    if ([429, 503, 504].includes(res.status) && forsok < OMFORSOK_VANTAN.length) {
+      const begart = Number(res.headers.get('Retry-After')) * 1000;
+      await vänta(Math.min(begart || OMFORSOK_VANTAN[forsok], 10000));
+      continue;
+    }
+    return { res, natfelInnan };
+  }
+}
+
 async function gFetch(path, opts = {}) {
-  const token = await getToken();
   const url   = path.startsWith('http') ? path : GRAPH + path;
-  const res   = await fetch(url, {
+  const metod = (opts.method || 'GET').toUpperCase();
+  const { res, natfelInnan } = await graphAnrop(url, {
     ...opts,
-    // opts.headers sist: annars gick if-match aldrig fram, det skrevs över här.
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(opts.headers || {}) }
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) }
   });
+  if (natfelInnan && metod === 'DELETE' && res.status === 404) return null;
+  if (natfelInnan && metod === 'PATCH' && res.status === 412) {
+    const item = await redanSparad(url, opts.body);
+    if (item) return item;
+  }
   if (!res.ok) {
     const err = await res.text().catch(() => res.status);
     const fel = new Error(`Graph ${res.status}: ${err}`);
@@ -402,12 +449,32 @@ async function gFetch(path, opts = {}) {
   return res.json();
 }
 
+// 412 efter ett nätverksfel kan betyda att vår egen första PATCH kom fram
+// men svaret tappades. Har posten exakt de värden vi skickade räknas det
+// som lyckat, och posten lämnas tillbaka med sin nya etag. Annars är det en
+// riktig krock. Graph utelämnar tomma fält, så saknat, null och '' är lika.
+// Datum jämförs som tidpunkter, ifall SharePoint formaterar om dem.
+async function redanSparad(url, body) {
+  let onskat;
+  try { onskat = JSON.parse(body).fields; } catch { return null; }
+  if (!onskat) return null;
+  const { res } = await graphAnrop(url + '?expand=fields', {});
+  if (!res.ok) return null;
+  const item = await res.json();
+  const f    = item.fields || {};
+  const norm = v => {
+    if (v === undefined || v === null || v === '') return '';
+    if (typeof v === 'string' && /^\d{4}-\d\d-\d\dT/.test(v)) return new Date(v).getTime();
+    return v;
+  };
+  return Object.keys(onskat).every(k => norm(f[k]) === norm(onskat[k])) ? item : null;
+}
+
 async function gGetAll(path) {
   let url = GRAPH + path;
   const items = [];
   while (url) {
-    const token = await getToken();
-    const res   = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const { res } = await graphAnrop(url, {});
     if (!res.ok) throw new Error(`Graph ${res.status}`);
     const data  = await res.json();
     items.push(...(data.value || []));
