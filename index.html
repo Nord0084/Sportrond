@@ -75,6 +75,15 @@ select { width: 100%; padding: 12px 14px; border: 0.5px solid var(--color-border
 .hist-avv-status { font-size: 11px; margin-top: 3px; }
 .filter-row { margin-bottom: 12px; }
 .avv-item { background: var(--color-background-primary); border: 0.5px solid var(--color-border-warning); border-radius: var(--border-radius-lg); padding: 14px; margin-bottom: 10px; }
+.avv-grupp { margin-bottom: 10px; }
+.avv-grupp summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 14px; background: var(--color-background-primary); border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-lg); font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
+.avv-grupp summary::-webkit-details-marker { display: none; }
+.avv-grupp summary::before { content: '▸'; color: var(--color-text-secondary); margin-right: 2px; }
+.avv-grupp[open] summary::before { content: '▾'; }
+.avv-grupp summary span:first-child { flex: 1; }
+.avv-grupp .antal { font-size: 12px; font-weight: 600; min-width: 24px; text-align: center; padding: 2px 8px; border-radius: 999px; background: var(--color-background-warning); color: var(--color-text-warning); }
+.avv-grupp[open] summary { margin-bottom: 8px; }
+.avv-grupp > .avv-item { margin-left: 10px; }
 .avv-item.atgardad { border-color: var(--color-border-success); opacity: 0.75; }
 .avv-item h3 { font-size: 14px; font-weight: 600; color: var(--color-text-warning); margin-bottom: 3px; }
 .avv-item.atgardad h3 { color: var(--color-text-success); }
@@ -1247,11 +1256,16 @@ function renderHistorik() {
 // ============================================================
 // UI: avvikelser
 // ============================================================
+// Grupperna börjar stängda, så listan blir en översikt med en rad per
+// anläggning. Vilka som är öppna minns vi här: annars skulle varje
+// "Markera åtgärdad" rita om listan och fälla ihop gruppen man står i.
+const avvOppnaGrupper = new Set();
+
 function renderAvvikelser() {
   const filterAnl = document.getElementById('avv-filter-anl').value;
   const el        = document.getElementById('avv-list');
   const expRow    = document.getElementById('export-avv-row');
-  const items     = [];
+  const grupper   = new Map();   // anläggning → html för dess avvikelser
   logs.forEach((l, li) => {
     if ((l.typ || 'sporthall') !== currentMode) return;
     if (filterAnl && l.anlaggning !== filterAnl) return;
@@ -1261,11 +1275,29 @@ function renderAvvikelser() {
       const cls    = a.atgardad ? 'atgardad' : '';
       const btnCls = a.atgardad ? 'done' : '';
       const btnTxt = a.atgardad ? `✓ Åtgärdad ${escHtml(a.atgDatum)}` : 'Markera åtgärdad';
-      items.push(`<div class="avv-item ${cls}"><h3>${escHtml(a.punkt)}</h3><p>${escHtml(a.text)}</p><div class="meta"><span>${escHtml(l.anlaggning)} · ${escHtml(l.datum)}</span><button class="atg-btn" onclick="openAvvEdit(${li},${ai})">✏️ Ändra text</button><button class="atg-btn ${btnCls}" onclick="toggleAtgardad(${li},${ai})">${btnTxt}</button></div></div>`);
+      if (!grupper.has(l.anlaggning)) grupper.set(l.anlaggning, []);
+      grupper.get(l.anlaggning).push(`<div class="avv-item ${cls}"><h3>${escHtml(a.punkt)}</h3><p>${escHtml(a.text)}</p><div class="meta"><span>${escHtml(l.datum)}</span><button class="atg-btn" onclick="openAvvEdit(${li},${ai})">✏️ Ändra text</button><button class="atg-btn ${btnCls}" onclick="toggleAtgardad(${li},${ai})">${btnTxt}</button></div></div>`);
     });
   });
-  el.innerHTML     = items.length ? items.join('') : '<div class="empty">Inga avvikelser att visa.</div>';
-  expRow.style.display = items.length ? 'block' : 'none';
+  // Samma ordning som i anläggningsväljaren. En anläggning som inte finns
+  // där (gammal stavning) hamnar sist i stället för att försvinna.
+  const ordning = anlaggningar();
+  const namn    = [...grupper.keys()].sort((x, y) =>
+    ((ordning.indexOf(x) + 1) || 1e9) - ((ordning.indexOf(y) + 1) || 1e9) || x.localeCompare(y, 'sv'));
+  el.innerHTML = namn.length
+    ? namn.map(anl => {
+        // Vid filter på en anläggning finns bara en grupp, och den ska synas.
+        const oppen = filterAnl || avvOppnaGrupper.has(anl) ? ' open' : '';
+        const rader = grupper.get(anl);
+        return `<details class="avv-grupp"${oppen} data-anl="${escHtml(anl)}" ontoggle="avvGruppToggle(this)"><summary><span>${escHtml(anl || 'Okänd anläggning')}</span><span class="antal">${rader.length}</span></summary>${rader.join('')}</details>`;
+      }).join('')
+    : '<div class="empty">Inga avvikelser att visa.</div>';
+  expRow.style.display = namn.length ? 'block' : 'none';
+}
+
+function avvGruppToggle(d) {
+  if (d.open) avvOppnaGrupper.add(d.dataset.anl);
+  else        avvOppnaGrupper.delete(d.dataset.anl);
 }
 
 async function toggleAtgardad(li, ai) {
